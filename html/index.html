@@ -1,0 +1,46 @@
+<html lang='en'>
+    <head>
+        <title>Hello World!</title>
+        <meta charset='utf-8'>
+    </head>
+    <body>
+        <div>
+            <video width='400' height='300' controls autoplay playsinline id='video'></video>
+        </div>
+    </body>
+    <script>
+        const video = document.getElementById('video');
+        if (window.MediaSource) {
+            const mediaSource = new MediaSource();
+            video.src = URL.createObjectURL(mediaSource);
+            mediaSource.addEventListener('sourceopen', sourceOpen);
+        } else
+            console.log("The Media Source Extensions API is not supported.");
+
+        async function sourceOpen(e) {
+            const mediaSource = e.target;
+            mediaSource.duration = 34;
+            const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.4D4028, mp4a.40.2"');
+            sourceBuffer.mode = 'sequence';
+
+            for (let i = 0; i <= 10; i++)
+            {
+                await fetch('sample/fragments/fragmented' + i + '.mp4')
+                    .then( response => response.arrayBuffer() )
+                    .then( data => new Promise(resolve => {
+                            sourceBuffer.appendBuffer(data);
+                            sourceBuffer.onupdateend = e => {
+                                sourceBuffer.onupdateend = null;
+                                resolve();
+                            }
+                        })
+                    );
+            }
+            mediaSource.endOfStream();
+        }
+
+        function fetchSegment(url) {
+            return fetch(url).then(response => response.arrayBuffer());
+        }
+    </script>
+</html>
