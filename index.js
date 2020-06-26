@@ -82,7 +82,7 @@ function startFfmpeg(path) {
         '-i', path,
         '-c:v', 'libx264',
         '-r', 24,
-        '-x264opts', 'fps=24:bitrate=2000:pass=1:vbv-maxrate=4000:vbv-bufsize=8000:keyint=24:min-keyint=24:scenecut=0:no-scenecut',
+        // '-x264opts', 'fps=24:bitrate=2000:pass=1:vbv-maxrate=4000:vbv-bufsize=8000:keyint=24:min-keyint=24:scenecut=0:no-scenecut',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-movflags', 'default_base_moof+frag_keyframe',
