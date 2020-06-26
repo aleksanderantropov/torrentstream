@@ -31,7 +31,7 @@
                             sourceBuffer.appendBuffer(data);
                             sourceBuffer.onupdateend = e => {
                                 sourceBuffer.onupdateend = null;
-                                resolve();
+                                setTimeout(() => resolve(), 5000);
                             }
                         })
                     );

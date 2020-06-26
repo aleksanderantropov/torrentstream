@@ -4,6 +4,7 @@ const http = require('http');
 const bencode = require('bencode');
 const events = require('events');
 const socks5 = require('socks5-http-client');
+const proxy = require('../proxy');
 
 module.exports = class {
     constructor(torrent, requests, peers) {
@@ -56,10 +57,10 @@ class Tracker {
         if (url.protocol == 'http:') {
             this.httpOptions = {
                 // proxy
-                socksHost: 'proxy.secureconnect.me',
-                socksPort: 1085,
-                socksUsername: 'aleksander.antropov@gmail.com',
-                socksPassword: 'S3P53unpJU4MWwf',
+                socksHost: proxy.host,
+                socksPort: proxy.port,
+                socksUsername: proxy.username,
+                socksPassword: proxy.password,
                 hostname: url.host,
                 path: url.path + '?' + this.requests.connectHttp(),
                 headers: {

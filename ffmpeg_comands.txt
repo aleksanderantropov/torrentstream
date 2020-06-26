@@ -1,0 +1,10 @@
+// crop
+ffmpeg -i * -ss 00:59:00 -t 90 *
+
+// convert to .mp4 and fragment
+ffmpeg -i * -c:v libx264 -c:a aac -pix_fmt yuv444p -r 25 -crf 24 -s 640x480 *
+
+
+
+// stream as hls
+ffmpeg -i http://localhost/convert -c:v libx264 -b:v 1100k -c:a aac -b:a 64k -f hls -hls_playlist_type vod hls.m3u8
