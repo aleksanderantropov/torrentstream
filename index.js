@@ -11,6 +11,7 @@ app.get('/', (req, res) => {
 
 let ffmpegStatus = 'idle';
 let path = 'media/Плохие парни навсегда_2020_BDRip/Плохие парни навсегда_2020_BDRip.avi';
+let fileExists = false;
 app.get('/hls', (req, res) => {
 
     createManifest();
@@ -20,7 +21,18 @@ app.get('/hls', (req, res) => {
 
     // torrentDownload();
     const timerId = setInterval(() => {
-        if (ffmpegStatus == 'idle')
+        if (!fileExists) {
+            fs.exists(path, exists => {
+                if (exists)
+                    fs.stat(path, (err, stat) => {
+                        if (!err && stat.size > 30000)
+                            fileExists = true;
+                    });
+            });
+        } else if (ffmpegStatus == 'idle')
+            startFfmpeg(path);
+
+        if (ffmpegStatus == 'idle' && fileExists)
             startFfmpeg(path);
     }, 2000);
 
@@ -81,23 +93,18 @@ function startFfmpeg(path) {
     const options = [
         '-i', path,
         '-c:v', 'libx264',
-        '-r', 24,
-        // '-x264opts', 'fps=24:bitrate=2000:pass=1:vbv-maxrate=4000:vbv-bufsize=8000:keyint=24:min-keyint=24:scenecut=0:no-scenecut',
         '-c:a', 'aac',
-        '-b:a', '128k',
-        '-movflags', 'default_base_moof+frag_keyframe',
         '-f', 'hls',
-        '-hls_time', 6,
         '-hls_playlist_type', 'event',
         '-hls_flags', 'omit_endlist',
         'video/hls/hls.m3u8'
     ];
     const process = spawn(cmd, options);
-    process.stdout.on('data', data => {
-        console.log(data)
-    });
-    process.stderr.setEncoding('utf8');
-    process.stderr.on('data', data => console.log(data));
+    // process.stdout.on('data', data => console.log(data));
+    // process.stderr.setEncoding('utf8');
+    // process.stderr.on('data', data => {
+    //     console.log(data);
+    // });
     process.on('close', () => {
         ffmpegStatus = 'idle';
         console.log('ffmpeg finish');

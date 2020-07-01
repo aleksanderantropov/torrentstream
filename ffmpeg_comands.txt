@@ -8,3 +8,18 @@ ffmpeg -i * -c:v libx264 -c:a aac -pix_fmt yuv444p -r 25 -crf 24 -s 640x480 *
 
 // stream as hls
 ffmpeg -i http://localhost/convert -c:v libx264 -b:v 1100k -c:a aac -b:a 64k -f hls -hls_playlist_type vod hls.m3u8
+
+// const options = [
+//     '-i', path,
+//     '-c:a', 'aac',
+//     '-b:a', '64k',
+//     '-c:v', 'libx264',
+//     '-r', 24,
+//     '-x264opts', 'fps=24:bitrate=2000:pass=1:vbv-maxrate=4000:vbv-bufsize=8000:keyint=24:min-keyint=24:scenecut=0:no-scenecut',
+//     '-movflags', 'default_base_moof+frag_keyframe',
+//     '-f', 'hls',
+//     // '-hls_time', 4,
+//     '-hls_playlist_type', 'event',
+//     '-hls_flags', 'omit_endlist',
+//     'video/hls/hls.m3u8'
+// ];
