@@ -25,104 +25,115 @@ app.get('/hls', (req, res) => {
         .then(() => torrentClient.getPeers())
         .then(async () => {
             const files = torrentClient.downloads;
+            const path = torrentClient.files.path;
             console.log(files);
+
             // check if we have subtitles
-            subtitles = files.filter(file => file.match(/.srt|.webvtt|.ass/));
+            const subsFilter = files.filter(file => file.match(/.srt|.webvtt|.ass/));
             movie = files.filter(file => file.match(/.avi|.mp4|.mkv|.webm|.vob|.ogg|.ogv|.flv|.amv|.mov/));
-            console.log('starting to download subtitles');
-            if (subtitles)
-                await torrentClient.download(subtitles);
-            // createMasterManifest();
-            console.log('starting to download the movie');
-            torrentClient.events.on('files-check', () => startFfmpeg(torrentClient.files.path, movie, subtitles));
-            torrentClient.download(movie)
-                .then(() => clearInterval(timerId));
+
+            console.log('Creating master playlist');
+            createMasterPlaylist(path);
+            if (subsFilter) {
+                console.log('starting to download subtitles');
+                await torrentClient.download(subsFilter);
+                subtitles = await convertSubtitles(path, subsFilter);
+            }
+            // console.log('starting to download the movie');
+            // torrentClient.events.on('files-check', () => convertVideo(path, movie));
+            // torrentClient.download(movie)
+            //     .then(() => clearInterval(timerId));
         })
         .catch(err => console.log(err));
 });
 
 app.get('/check', (req, res) => {
+    const directory = torrentClient.parser.torrent.info.name;
+    const path = torrentClient.files.path;
     const timerId = setInterval(() => {
-        if (torrentClient && torrentClient.files && fs.existsSync(torrentClient.files.path + 'hls.m3u8')) {
+        if (subtitles) {
             clearInterval(timerId);
             res.writeHead(200, {'Content-Type': 'application/json'});
-            res.end(JSON.stringify({path: 'hls/' + torrentClient.parser.torrent.info.name + '/'}));
+            res.end(
+                JSON.stringify({
+                    path: 'hls/' + directory,
+                    subtitles: '/' + subtitles,
+                    master: '/master.m3u8'
+                })
+            );
         }
     }, 1000);
 });
 
 app.listen(80);
 
-// simulate torrent downloading
-function torrentDownload() {
-    const fileRead = fs.openSync('video/hls/fragment_arcansas.avi', 'r');
-    const fileWrite = fs.openSync('video/hls/fragment_arcansas_generated.avi', 'w+');
-    const buf = new Buffer.alloc(100000);
-    let readBytes = 0;
-
-    const timerId = setInterval(() => {
-        if (readsome() <= 0)
-            clearInterval(timerId);
-    }, 4000);
-
-    function readsome() {
-        const result = fs.readSync(fileRead, buf, 0, 100000, readBytes);
-        if (result > 0)
-            fs.writeSync(fileWrite, buf, 0, result, readBytes);
-        if (ffmpegStatus == 'idle')
-            startFfmpeg(ffmpegStatus);
-        readBytes += result;
-        return result;
-    }
+function createMasterPlaylist(path) {
+    const data =
+        "#EXTM3U\n" +
+        "#EXT-X-VERSION:3\n" +
+        '#EXT-X-STREAM-INF:BANDWIDTH=1240800,CODECS="avc1.64001f,mp4a.40.2"\n' +
+        "hls.m3u8\n\n";
+    fs.writeFile(path + '/master.m3u8', data, (err) => {
+        if (err) console.log('Couldn\'t write to file: ', path + '/master.m3u8');
+    });
 }
 
-async function startFfmpeg(path, video, subtitles) {
+async function convertSubtitles(path, subtitles) {
+    const output = 'subtitles.vtt';
+    return new Promise(resolve => {
+        const spawn = require('child_process').spawn;
+        const cmd = 'ffmpeg';
+        let options = [
+            '-i', path + subtitles,
+            path + output
+        ];
+        const process = spawn(cmd, options);
+        process.on('close', () => {
+            resolve(output);
+        });
+    });
+}
+
+async function convertVideo(path, video, subtitles) {
     if (!fileExists) {
-        fs.exists(torrentClient.files.path + movie, exists => {
+        fs.exists(path + video, exists => {
+            console.log('file exists: ', exists);
             if (exists)
-                fs.stat(torrentClient.files.path + movie, (err, stat) => {
+                fs.stat(path + video, (err, stat) => {
                     if (!err && stat.size > 30000)
                         fileExists = true;
                 });
         });
     }
     if (ffmpegStatus != 'idle' || !fileExists) {
-        setTimeout(() => startFfmpeg(path, video, subtitles), 2000);
+        setTimeout(() => convertVideo(path, video, subtitles), 2000);
         return ;
     }
-    console.log('start ffmpeg');
+    console.log('converting video');
     ffmpegStatus = 'converting';
     const offset = countOffset(path);
     console.log('offset: ', offset);
     const spawn = require('child_process').spawn;
     const cmd = 'ffmpeg';
-    let options = [];
-    options.push('-i', path + video);
-    if (subtitles)
-        options.push('-i', path + subtitles);
-    options.push(
+    let options = [
+        '-i', path + video,
         '-ss', offset,
         '-c:v', 'libx264',
+        '-b:v', '1000k',
         '-c:a', 'aac',
-    );
-    if (subtitles)
-        options.push( '-c:s', 'webvtt' );
-    options.push(
-        '-start_number', 0,
-        '-var_stream_map', 'v:0,a:0,s:0',
-        '-master_pl_name', 'hls.m3u8',
+        '-b:a', '128k',
         '-f', 'hls',
         '-hls_time', 4,
         '-hls_playlist_type', 'event',
-        '-hls_flags', 'append_list',
-        path + 't.m3u8'
-    );
+        '-hls_flags', 'append_list+omit_endlist',
+        path + 'hls.m3u8'
+    ];
     const process = spawn(cmd, options);
-    process.stdout.on('data', data => console.log(data));
-    process.stderr.setEncoding('utf8');
-    process.stderr.on('data', data => {
-        console.log(data);
-    });
+    // process.stdout.on('data', data => console.log(data));
+    // process.stderr.setEncoding('utf8');
+    // process.stderr.on('data', data => {
+    //     console.log(data);
+    // });
     process.on('close', () => {
         ffmpegStatus = 'idle';
         console.log('ffmpeg finish');

@@ -106,7 +106,7 @@ class Peer {
                     break ;
                 case 4:
                 case 5:
-                    this.forceHandler();
+                    this.forceDownloadHandler();
                     break ;
                 case 7:
                     this.pieceHandler(message.payload);
@@ -162,7 +162,6 @@ class Peer {
             // block index
             const bindex = piece.begin / this.parser.BLOCK_SIZE;
             if ( this.blocks.needed( piece.index, bindex ) ) {
-                console.log('requesting: ', piece);
                 this.socket.write( this.requests.piece(piece) );
                 this.blocks.requested[piece.index][bindex] = true;
                 break ;

@@ -5,15 +5,19 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@canary"></script>
 </head>
 <body>
-    <video id="video" controls></video>
+    <div id="container"></div>
     <script>
         fetch('/check')
         .then(response => response.json())
         .then(result => {
+            console.log(result);
+            const path = "http://localhost/" + result.path;
+            container.insertAdjacentHTML('afterBegin', "<video id='video' controls width='640' height='360'> <track src='" + path + result.subtitles + "' label='English' > </video>" );
             const video = document.getElementById("video");
             const hls = new Hls();
-            hls.loadSource("http://localhost/" + result.path + "hls.m3u8");
+            hls.loadSource(path + result.master);
             hls.attachMedia(video);
+            hls.on(Hls.Events.ERROR, (event, data) => console.log(event, data));
         });
     </script>
 </body>
