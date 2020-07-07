@@ -33,7 +33,10 @@ module.exports = class {
         this.trackers.forEach( tracker => tracker.rerequest() );
     }
     close() {
-        this.trackers.forEach( tracker => clearTimeout(tracker.timeout) );
+        this.trackers.forEach( tracker => {
+            clearTimeout(tracker.timeout);
+            if (tracker.socket) tracker.socket.close();
+        });
     }
 }
 
@@ -92,8 +95,7 @@ class Tracker {
                 .map( address => {
                     return {
                         ip: address.slice(0, 4).join('.'),
-                        port: address.readUInt16BE(4),
-                        connected: null
+                        port: address.readUInt16BE(4)
                     }
                 });
             this.peers.add(peers);
@@ -122,8 +124,7 @@ class Tracker {
             .map( address => {
                 return {
                     ip: address.slice(0, 4).join('.'),
-                    port: address.readUInt16BE(4),
-                    connected: null
+                    port: address.readUInt16BE(4)
                 }
             });
         this.peers.add(peers);
@@ -137,13 +138,12 @@ class Tracker {
         return peers;
     }
     // rerequest new peers
-    rerequest() {
+    rerequest(left, downloaded) {
         if (!this.interval) return ;
-
         clearTimeout(this.timeout);
         this.timeout = setTimeout( ()=> {
             if (this.url.protocol == 'udp:' && this.connectionId)
-                this.sendUdp( this.requests.announceUdp(this.connectionId) );
+                this.sendUdp( this.requests.announceUdp(this.connectionId, left, downloaded) );
 
             if (this.url.protocol == 'http:')
                 this.sendHttp(this.httpOptions);

@@ -8,11 +8,11 @@
     <video id="video" controls></video>
     <script>
         fetch('/check')
-        .then((response) => {
-            console.log(response);
+        .then(response => response.json())
+        .then(result => {
             const video = document.getElementById("video");
             const hls = new Hls();
-            hls.loadSource("http://localhost/hls/hls.m3u8");
+            hls.loadSource("http://localhost/" + result.path + "hls.m3u8");
             hls.attachMedia(video);
         });
     </script>

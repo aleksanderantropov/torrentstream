@@ -3,7 +3,7 @@ const crypto = require('crypto');
 
 module.exports = class {
     constructor(left, hashedInfo, requests) {
-        this.left = '' + left;
+        this.left = left;
         this.port = 6881;
         this.hashedInfo = hashedInfo;
         this.peerId = crypto.randomBytes(20);
@@ -23,7 +23,7 @@ module.exports = class {
         return buffer;
     }
 
-    announceUdp(connectionId) {
+    announceUdp(connectionId, left = this.left, downloaded = 0) {
         const buffer = Buffer.alloc(98);
         // connectionId
         connectionId.copy(buffer, 0);
@@ -36,19 +36,19 @@ module.exports = class {
         // peerId: unique client id
         this.peerId.copy(buffer, 36);
         // downloaded: total amount of downloaded since sent 'started' event = 0
-        Buffer.alloc(8).copy(buffer, 56);
+        Buffer.from('' + downloaded).copy(buffer, 56);
         // left
-        Buffer.from(this.left).copy(buffer, 56);
+        Buffer.from('' + left).copy(buffer, 64);
         // uploaded: total amount of uploaded since sent 'started' event = 0
         Buffer.alloc(8).copy(buffer, 72);
         // event: started
         buffer.writeUInt32BE(0, 80);
         // ip address of client machine (optional)
-        buffer.writeUInt32BE(0, 80);
+        buffer.writeUInt32BE(0, 84);
         //key: for tracker to identify us (optional)
         crypto.randomBytes(4).copy(buffer, 88);
         // num want: number of peers we want to receive (optional)
-        buffer.writeInt32BE(-1, 92);
+        buffer.writeInt32BE(100, 92);
         // port
         buffer.writeUInt16BE(this.port, 96);
         return buffer;

@@ -1,24 +1,35 @@
 const events = require('events');
 const net = require('net');
+const { exit } = require('process');
 
 module.exports = class {
-    constructor(requests, blocks, parser, files) {
+    constructor(requests, blocks, parser) {
         this.requests = requests;
         this.blocks = blocks;
         this.parser = parser;
-        this.files = files;
         this.list = [];
+        this.outputList = [];
         this.events = new events();
     }
 
     // add new peers, filter out duplicates
     add(list) {
+        list = list.map(peer => {
+            return {
+                ip: peer.ip,
+                port: peer.port,
+                connected: null
+            }
+        });
         // filter leave only items that satisfy a condition
         this.list = this.list.concat(list).filter( (peer, index, self) =>
             // findIndex returns the index of the first element that satisfies testing function
             // therefore condition is only first indices of same peers
             index === self.findIndex( item => (item.port == peer.port && item.ip == peer.ip) )
         );
+        this.outputList = this.list.map(peer => {
+            return {ip: peer.ip, port: peer.port};
+        });
         // emit event (it's being listened to in client.js)
         this.events.emit('peers-added');
     }
@@ -26,9 +37,10 @@ module.exports = class {
     connect() {
         this.list.forEach( p => {
             if ( !p.connected ) {
-                p.peer = new Peer(this.requests, this.blocks, this.parser, this.files);
+                p.peer = new Peer(this.requests, this.blocks, this.parser);
                 p.peer.connect(p.ip, p.port);
                 p.connected = true;
+                p.peer.events.on('piece-received', piece => this.events.emit('piece-received', piece));
             }
         });
     }
@@ -45,19 +57,17 @@ module.exports = class {
 }
 
 class Peer {
-    constructor(requests, blocks, parser, files) {
+    constructor(requests, blocks, parser) {
+        this.events = new events();
         this.requests = requests;
         this.blocks = blocks;
         this.parser = parser;
-        this.files = files;
         // first message is always a handshake
         this.handshake = true;
         // we start as choked with a new peer and wait for unchoke
         this.choked = true;
         // we will queue pieces to download
         this.queue = [];
-        // we will save what peer has to restore lost pieces
-        this.have = [];
         // we are interested in what peer has
         this.interested = false;
     }
@@ -95,10 +105,8 @@ class Peer {
                     this.unchokeHandler();
                     break ;
                 case 4:
-                    this.haveHandler(message.payload);
-                    break ;
                 case 5:
-                    this.bitfieldHandler(message.payload);
+                    this.forceHandler();
                     break ;
                 case 7:
                     this.pieceHandler(message.payload);
@@ -114,70 +122,25 @@ class Peer {
     // unchoke, add have to queue and request a piece
     unchokeHandler() {
         this.choked = false;
-        this.have.forEach( piece => {
-            if ( this.blocks.needed(piece) ) this.queueAdd(piece);
-        });
-        this.request();
+        // fill queue with what we need
+        this.blocks.missing().forEach( piece => this.queueAdd(piece) );
+        this.requestNext();
     }
-    // add to have, queue and start request
-    haveHandler(payload) {
+    forceDownloadHandler() {
         const empty = !this.queue.length;
 
-        // piece index
-        const index = payload.readUInt32BE(0);
-        // add to have
-        this.have.push(index);
-        // check if we need the piece - add to queue
-        if ( this.blocks.needed(index) ) {
-            this.queueAdd(index);
-            // write interested
-            if ( !this.interested ) {
-                this.interested = true;
-                this.socket.write( this.requests.interested() );
-            }
-        }
-        // if queue was empty, start request
-        if (empty)
-            this.request();
-    }
-    // split 1 message that contains all pieces peer has into piece indices and add to have, queue and start request
-    bitfieldHandler(payload) {
-        const empty = !this.queue.length;
-
-        // we received all pieces in 1 message, break into pieces and add to queue
-        // each bit represents a piece: 0 - doesn't have, 1 - has
-        // we split each byte into bits and read them
-        payload.forEach( (byte, index) => {
-            // split byte into 8 bits
-            for (let i = 0; i < 8; i++) {
-                // check that the most right bit is 1 = we have that piece
-                if (byte & 1) {
-                    // each index is 8 pieces, the most right bit is first piece in the sequence (and we check left)
-                    const piece = index * 8 + 7 - i;
-                    this.have.push(piece);
-                    // check if we need this piece and queue it
-                    if ( this.blocks.needed(index) ) {
-                        this.queueAdd(index);
-                        // write interested
-                        if ( !this.interested ) {
-                            this.interested = true;
-                            this.socket.write( this.requests.interested() );
-                        }
-                    }
-                }
-                // shift to the right discarding the most left bit to read bit by bit
-                byte = byte >> 1;
-            }
-        });
-        // if queue was empty, start request
-        if (empty) this.request();
+        if ( !this.interested ) {
+            this.interested = true;
+            this.socket.write( this.requests.interested() );
+        } 
+        if (empty) this.requestNext();
     }
     // we received a piece, add to received, write to file, check if we are all done, request next
     pieceHandler(piece) {
         // add to received
         this.blocks.received[piece.index][piece.begin / this.parser.BLOCK_SIZE] = true;
-        // write to file
-        this.files.write(piece);
+        // emit event to write piece in outer function
+        this.events.emit('piece-received', piece);
         // check if we are done
         if ( this.blocks.complete() ) {
             // we are done
@@ -185,12 +148,12 @@ class Peer {
         }
         else if ( this.blocks.lost ) {
             // add missing to queue
-            this.blocks.missing().forEach( piece => this.queueAdd(piece, true) );
+            this.blocks.missing().forEach( piece => this.queueAdd(piece) );
         }
-        this.request();
+        this.requestNext();
     }
     // get first element off the queue and request
-    request() {
+    requestNext() {
         // wait to be unchoked to start requesting
         if (this.choked) return ;
 
@@ -199,6 +162,7 @@ class Peer {
             // block index
             const bindex = piece.begin / this.parser.BLOCK_SIZE;
             if ( this.blocks.needed( piece.index, bindex ) ) {
+                console.log('requesting: ', piece);
                 this.socket.write( this.requests.piece(piece) );
                 this.blocks.requested[piece.index][bindex] = true;
                 break ;
@@ -206,9 +170,7 @@ class Peer {
         }
     }
     // split piece into blocks and add to queue
-    queueAdd(pindex, checkHave = null) {
-        if ( checkHave && !this.have.includes(pindex) )
-            return ;
+    queueAdd(pindex) {
         const length = this.parser.getNumberOfBlocks(pindex);
         // split piece into blocks and add to queue
         for (let bindex = 0; bindex < length; bindex++) {
@@ -218,7 +180,5 @@ class Peer {
                 length: this.parser.getBlockSize(pindex, bindex)
             });
         }
-        // sort by piece index
-        this.queue.sort( (a, b) => a.index > b.index);
     }
 }

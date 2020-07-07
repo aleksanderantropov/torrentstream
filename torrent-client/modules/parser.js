@@ -61,8 +61,4 @@ module.exports = class {
         return (blockIndex == lastBlockIndex && lastBlockSize != 0
             ? lastBlockSize : this.BLOCK_SIZE);
     }
-
-    getHashInfo() {
-        
-    }
 }

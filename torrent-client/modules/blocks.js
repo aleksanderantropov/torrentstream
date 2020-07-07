@@ -15,6 +15,7 @@ module.exports = class {
 
     // check if we need this piece or block
     needed(pindex, bindex = null) {
+
         if (bindex !== null)
             return !this.requested[pindex][bindex];
         return !this.requested[pindex].every(block => block);

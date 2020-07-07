@@ -4,76 +4,136 @@ const Files = require('./modules/files');
 const Request = require('./modules/request');
 const Trackers = require('./modules/trackers');
 const Peers = require('./modules/peers');
+const fs = require('fs');
+const fpromise = require('fs/promises');
+const { exit } = require('process');
+const events = require('events');
 
 module.exports = class {
     constructor(path) {
         this.path = path;
         // can be deleted in production
         this.buffer = Buffer.alloc(100);
+        // tracker failed connections
+        this.failed = 0;
+        this.events = new events();
     }
 
-    download(torrentFile) {
+    initialize(torrentFile) {
         return new Promise(async resolve => {
-            // tracker failed connections
-            let failed = 0;
             // parse torrent file into object
-            const parser = new Parser();
-            await parser.read(torrentFile);
+            this.parser = new Parser();
+            await this.parser.read(torrentFile);
             // create pieces and blocks to track download process
-            const blocks = new Blocks( parser );
-            // check how much left to download and mark blocks we already have
-            const files = new Files(this.path, blocks, parser);
-            const left = await files.check();
-
-            // all write functions can be deleted in production
-            const total = blocks.received.reduce( (total, blocks) => blocks.length + total, 0);
-            this.write('Left to download: ' + left + '. Requesting peers.');
-
-            // everything is downloaded
-            if (left == 0)
-                return resolve(0);
-
-            // starting/continuing download
-            await files.create();
-            // connect to tracker and get peers
-            const requests = new Request(left, parser.details.hashedInfo);
-            const peers = new Peers(requests, blocks, parser, files);
-            const trackers = new Trackers(parser.torrent, requests, peers);
-            trackers.connect();
-
+            this.blocks = new Blocks( this.parser );
+            // create files
+            this.files = new Files(this.path, this.blocks, this.parser);
+            // this.left = this.parser.details.sizeNumber;
+            this.left = 82372;
+            // save file paths that we will download
+            this.downloads = this.files.files.map(file => file.path.toString());
+            this.requests = new Request(this.left, this.parser.details.hashedInfo);
+            this.peers = new Peers(this.requests, this.blocks, this.parser);
+            this.trackers = new Trackers(this.parser.torrent, this.requests, this.peers);
+            // create path and project folder
+            await fpromise.mkdir(this.files.path, {recursive: true})
+                .catch(() => {
+                    console.log('Couldn\'t create directory: ', this.path);
+                    process.exit(1);
+                });
             // events
-            trackers.events.on('connect-fail', () => {
-                failed++;
+            this.trackers.events.on('connect-fail', () => {
+                this.failed++;
                 this.write('Couldn\'t connect to tracker.');
-                if (failed == trackers.trackers.length * (trackers.retries + 1) ) {
+                if (this.failed == this.trackers.trackers.length * (this.trackers.retries + 1) ) {
                     this.write('Exceeded number of retries. Couldn\'t connect to tracker.\n');
                     resolve(-1);
                 }
             });
-            peers.events.on( 'peers-added', () => {
-                if (!files.downloaded) {
-                    this.write('Connecting to peers.');
-                    peers.connect();
-                    // rerequest new peers after a timeout
-                    trackers.rerequest();
+            // unnecessary event - can be deleted in production
+            this.files.events.on( 'piece-written', () => {
+                // print progress
+                const received = this.blocks.received.reduce( (total, blocks) => blocks.filter(b => b).length + total, 0);
+                const percent = Math.floor(received / this.total * 100);
+                this.write('Complete: ' + percent + '% [' + received + ' / ' + this.total + ']', false);
+                this.events.emit('piece-written');
+            });
+            resolve();
+        });
+    }
+
+    getPeers() {
+        return new Promise(async resolve => {
+            // load peers from file if exists
+            const downloadDir = this.path + '/' + this.parser.torrent.info.name;
+            fs.readFile(downloadDir + '/peers.json', (err, data) => {
+                if (!err) {
+                    try {
+                        this.write('Uploading peers from a file.');
+                        const decoded = JSON.parse(data.toString());
+                        this.peers.add(decoded);
+                    } catch (e) {
+                        this.write('Couldn\'t parse JSON file: ', downloadDir + '/peers.json');
+                    }
                 }
             });
-            files.events.on( 'finish', () => {
-                peers.close();
-                files.close();
-                trackers.close();
+
+            // connect to tracker and get peers
+            this.write('Requesting peers from trackers.');
+            this.trackers.connect();
+            // output peers to a file
+            this.peers.events.on( 'peers-added', () => fs.writeFile(this.files.path + 'peers.json', JSON.stringify(this.peers.outputList), () => resolve()) );
+        });
+    }
+
+    download(filename) {
+        return new Promise(async resolve => {
+            this.write('Checking files.');
+            // check if file exists and how much data we already have
+            const status = await this.files.checkFile(filename).catch((err) => console.log(err));
+            this.events.emit('files-check');
+            if (status == 'downloaded') {
+                this.write('Download complete.');
+                this.trackers.close();
+                resolve(1);
+                return ;
+            }
+
+            this.write('Creating files.');
+            // if something needs to be downloaded, create fds for writing
+            await this.files.createFile(filename).catch((err) => console.log(err));
+
+            // for stats
+            this.total = this.blocks.received.reduce( (total, blocks) => blocks.length + total, 0);
+
+            this.write('Connecting to peers.');
+            this.peers.connect();
+
+            // rerequest new peers
+            this.trackers.rerequest();
+
+            // events
+            this.peers.events.on( 'peers-added', () => {
+                if (!this.files.downloaded) {
+                    this.write('Connecting to peers.');
+                    this.peers.connect();
+                    // rerequest new peers after a timeout
+                    this.trackers.rerequest(this.files.left, this.files.downloaded);
+                }
+            });
+            this.peers.events.on( 'piece-received', piece => {
+                this.files.writeFile(filename, piece);
+            });
+            this.files.events.on( 'finish', () => {
+                this.peers.close();
+                this.trackers.close();
+                this.files.close(filename);
                 this.write('Download complete.');
                 resolve(1);
             });
-            // unnecessary event - can be deleted in production
-            files.events.on( 'piece-written', () => {
-                // print progress
-                const received = blocks.received.reduce( (total, blocks) => blocks.filter(b => b).length + total, 0);
-                const percent = Math.floor(received / total * 100);
-                this.write('Complete: ' + percent + '% [' + received + ' / ' + total + ']', false);
-            });
         });
     }
+
     // can be deleted in production
     write(message, clear = true) {
         if (clear)
