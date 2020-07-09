@@ -1,46 +1,75 @@
-<html lang='en'>
-    <head>
-        <title>Hello World!</title>
-        <meta charset='utf-8'>
-    </head>
-    <body>
-        <div>
-            <video width='400' height='300' controls autoplay playsinline id='video'></video>
-        </div>
-    </body>
+<html>
+<head>
+    <title>Player</title>
+    <meta charset='utf-8'>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@canary"></script>
+</head>
+<body>
+    <style>
+        .player {
+            width: 640px;
+            height: 360px;
+        }
+        .player_empty {
+            position: relative;
+            background: #000;
+            cursor: pointer;
+        }
+        .player_empty:before,
+        .player_empty:after {
+            content: '';
+            display: block;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+        }
+        .player_empty:hover:before,
+        .player_empty:hover:after {
+            opacity: .8;
+        }
+        .player_empty:before {
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 2px #ccc solid;
+            width: 50px;
+            height: 50px;
+        }
+        .player_empty:after {
+            transform: translate(-35%, -50%);
+            width: 0;
+            height: 0;
+            border-style: solid;
+            border-width: 12.5px 0 12.5px 25px;
+            border-color: transparent transparent transparent #fff;
+        }
+    </style>
+    <div id="errors"></div>
+    <div id="container" class="player player_empty"></div>
     <script>
-        const video = document.getElementById('video');
-        if (window.MediaSource) {
-            const mediaSource = new MediaSource();
-            video.src = URL.createObjectURL(mediaSource);
-            mediaSource.addEventListener('sourceopen', sourceOpen);
-        } else
-            console.log("The Media Source Extensions API is not supported.");
-
-        async function sourceOpen(e) {
-            const mediaSource = e.target;
-            mediaSource.duration = 34;
-            const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.4D4028, mp4a.40.2"');
-            sourceBuffer.mode = 'sequence';
-
-            for (let i = 0; i <= 10; i++)
-            {
-                await fetch('sample/fragments/fragmented' + i + '.mp4')
-                    .then( response => response.arrayBuffer() )
-                    .then( data => new Promise(resolve => {
-                            sourceBuffer.appendBuffer(data);
-                            sourceBuffer.onupdateend = e => {
-                                sourceBuffer.onupdateend = null;
-                                setTimeout(() => resolve(), 5000);
-                            }
-                        })
-                    );
-            }
-            mediaSource.endOfStream();
+        const placeholder = document.querySelector('.player_empty');
+        placeholder.onclick = event => {
+            placeholder.onclick = null;
+            fetch('?action=play')
+                .then(response => response.json())
+                .then(response => {
+                    console.log(response);
+                    if (response.errors) {
+                        errors.innerHTML = "";
+                        response.errors.forEach(error => errors.insertAdjacentHTML('beforeEnd', "<p>" + error + "</p>"));
+                    } else {
+                        const path = "http://localhost/" + response.path.substring( response.path.indexOf('video/') + 'video/'.length );
+                        container.insertAdjacentHTML('afterBegin', "<video id='video' controls width='640' height='360'> <track src='" + path + response.subtitles + "' label='English' > </video>" );
+                        const video = document.getElementById("video");
+                        const hls = new Hls();
+                        hls.loadSource(path + response.playlist);
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.ERROR, (event, data) => console.log(event, data));
+                        
+                        placeholder.classList.remove('player_empty');
+                    }
+                });
         }
 
-        function fetchSegment(url) {
-            return fetch(url).then(response => response.arrayBuffer());
-        }
     </script>
+</body>
 </html>

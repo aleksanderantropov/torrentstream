@@ -38,7 +38,7 @@ module.exports = class {
             // create path and project folder
             await fpromise.mkdir(this.files.path, {recursive: true})
                 .catch(() => {
-                    console.log('Couldn\'t create directory: ', this.path);
+                    console.log('TorrentClient: Couldn\'t create directory: ', this.path);
                     process.exit(1);
                 });
             // events
@@ -91,7 +91,7 @@ module.exports = class {
             this.write('Checking files.');
             // check if file exists and how much data we already have
             const status = await this.files.checkFile(filename).catch((err) => console.log(err));
-            this.events.emit('files-check');
+            this.events.emit('files-checked');
             if (status == 'downloaded') {
                 this.write('Download complete.');
                 this.trackers.close();
@@ -125,10 +125,10 @@ module.exports = class {
                 this.files.writeFile(filename, piece);
             });
             this.files.events.on( 'finish', () => {
+                this.write('Download complete.');
                 this.peers.close();
                 this.trackers.close();
                 this.files.close(filename);
-                this.write('Download complete.');
                 resolve(1);
             });
         });
@@ -138,6 +138,6 @@ module.exports = class {
     write(message, clear = true) {
         if (clear)
             process.stdout.write(this.buffer);
-        process.stdout.write('\r' + message + '\r');
+        process.stdout.write('\rTorrentClient: ' + message + '\r');
     }
 }

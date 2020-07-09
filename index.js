@@ -1,154 +1,44 @@
 const express = require('express');
 const app = express();
-const fs = require('fs');
-const TorrentClient = require('./torrent-client/client');
-const events = require('events');
-const { exit } = require('process');
+
+const TorrentClient = require('./TorrentClient/TorrentClient');
+const Stream = require('./Stream/Stream');
 
 app.use(express.static('video'));
 
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/html/index.html');
-});
+let torrent, stream;
+app.get('/movie', async (req, res) => {
 
-let ffmpegStatus = 'idle';
-let fileExists = false;
-let movie, subtitles, timerId;
+    switch (req.query.action) {
+        // User 
+        case 'play':
+            // User pressed play: download files and start stream
+            stream = new Stream();
+            await stream.initialize(torrent).catch(() => {});
+            if (stream.errors.length) return answer(res, {errors: stream.errors});
+            stream.createPlaylist();
+            await torrent.download(stream.files.subtitles).catch(() => {});
+            await stream.convertSubtitles().catch(() => {});
+            torrent.download(stream.files.movie);
+            torrent.events.on('piece-written', () => stream.convertVideo());
+            torrent.events.on('files-checked', () => stream.convertVideo());
+            stream.events.on('manifest-created',
+                () => answer(res, {path: stream.path, playlist: stream.playlist, subtitles: stream.subtitles}));
+            break ;
+        default:
+            // User opens the page: initialize torrent and get peers
+            torrent = new TorrentClient('video');
+            torrent.initialize('torrent-files/mall.torrent')
+                .then(() => torrent.getPeers());
 
-const torrentClient = new TorrentClient('video/hls');
-
-app.get('/hls', (req, res) => {
-    // serve page
-    res.sendFile(__dirname + '/html/hls.html');
-
-    torrentClient.initialize('torrent-files/mall.torrent')
-        .then(() => torrentClient.getPeers())
-        .then(async () => {
-            const files = torrentClient.downloads;
-            const path = torrentClient.files.path;
-            console.log(files);
-
-            // check if we have subtitles
-            const subsFilter = files.filter(file => file.match(/.srt|.webvtt|.ass/));
-            movie = files.filter(file => file.match(/.avi|.mp4|.mkv|.webm|.vob|.ogg|.ogv|.flv|.amv|.mov/));
-
-            console.log('Creating master playlist');
-            createMasterPlaylist(path);
-            if (subsFilter) {
-                console.log('starting to download subtitles');
-                await torrentClient.download(subsFilter);
-                subtitles = await convertSubtitles(path, subsFilter);
-            }
-            // console.log('starting to download the movie');
-            // torrentClient.events.on('files-check', () => convertVideo(path, movie));
-            // torrentClient.download(movie)
-            //     .then(() => clearInterval(timerId));
-        })
-        .catch(err => console.log(err));
-});
-
-app.get('/check', (req, res) => {
-    const directory = torrentClient.parser.torrent.info.name;
-    const path = torrentClient.files.path;
-    const timerId = setInterval(() => {
-        if (subtitles) {
-            clearInterval(timerId);
-            res.writeHead(200, {'Content-Type': 'application/json'});
-            res.end(
-                JSON.stringify({
-                    path: 'hls/' + directory,
-                    subtitles: '/' + subtitles,
-                    master: '/master.m3u8'
-                })
-            );
-        }
-    }, 1000);
+            res.sendFile(__dirname + '/html/index.html');
+            break ;
+    }
 });
 
 app.listen(80);
 
-function createMasterPlaylist(path) {
-    const data =
-        "#EXTM3U\n" +
-        "#EXT-X-VERSION:3\n" +
-        '#EXT-X-STREAM-INF:BANDWIDTH=1240800,CODECS="avc1.64001f,mp4a.40.2"\n' +
-        "hls.m3u8\n\n";
-    fs.writeFile(path + '/master.m3u8', data, (err) => {
-        if (err) console.log('Couldn\'t write to file: ', path + '/master.m3u8');
-    });
-}
-
-async function convertSubtitles(path, subtitles) {
-    const output = 'subtitles.vtt';
-    return new Promise(resolve => {
-        const spawn = require('child_process').spawn;
-        const cmd = 'ffmpeg';
-        let options = [
-            '-i', path + subtitles,
-            path + output
-        ];
-        const process = spawn(cmd, options);
-        process.on('close', () => {
-            resolve(output);
-        });
-    });
-}
-
-async function convertVideo(path, video, subtitles) {
-    if (!fileExists) {
-        fs.exists(path + video, exists => {
-            console.log('file exists: ', exists);
-            if (exists)
-                fs.stat(path + video, (err, stat) => {
-                    if (!err && stat.size > 30000)
-                        fileExists = true;
-                });
-        });
-    }
-    if (ffmpegStatus != 'idle' || !fileExists) {
-        setTimeout(() => convertVideo(path, video, subtitles), 2000);
-        return ;
-    }
-    console.log('converting video');
-    ffmpegStatus = 'converting';
-    const offset = countOffset(path);
-    console.log('offset: ', offset);
-    const spawn = require('child_process').spawn;
-    const cmd = 'ffmpeg';
-    let options = [
-        '-i', path + video,
-        '-ss', offset,
-        '-c:v', 'libx264',
-        '-b:v', '1000k',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-f', 'hls',
-        '-hls_time', 4,
-        '-hls_playlist_type', 'event',
-        '-hls_flags', 'append_list+omit_endlist',
-        path + 'hls.m3u8'
-    ];
-    const process = spawn(cmd, options);
-    // process.stdout.on('data', data => console.log(data));
-    // process.stderr.setEncoding('utf8');
-    // process.stderr.on('data', data => {
-    //     console.log(data);
-    // });
-    process.on('close', () => {
-        ffmpegStatus = 'idle';
-        console.log('ffmpeg finish');
-    });
-
-    function countOffset(path) {
-        console.log(path);
-        if (!fs.existsSync(path + 't.m3u8')) return (0);
-        const data = fs.readFileSync(path + 't.m3u8').toString();
-        console.log(data);
-        const pattern = /#EXTINF:(?<duration>\d+\.\d+)/g;
-        const result = [...data.matchAll(pattern)];
-        let duration = 0;
-        for (let i = 0; i < result.length - 1; i++)
-            duration += parseFloat(result[i][1]);
-        return (duration);
-    }
+function answer(res, object) { 
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify(object));
 }

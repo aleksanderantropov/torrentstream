@@ -37,6 +37,7 @@ module.exports = class {
             clearTimeout(tracker.timeout);
             if (tracker.socket) tracker.socket.close();
         });
+        this.trackers = [];
     }
 }
 

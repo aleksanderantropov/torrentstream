@@ -53,7 +53,7 @@ module.exports = class {
         let file = this.details[filename];
         if (!file)
         {
-            console.log('No such file: ', filename);
+            console.log('TorrentClient: Couldn\'t open file: ', filename);
             process.exit(1);
         }
         // check if we have the file 
@@ -82,7 +82,7 @@ module.exports = class {
             // open file
             const filehandle = await fpromise.open(this.path + filename)
                 .catch(() => {
-                    console.log('Couldn\'t open file: ', this.path + filename);
+                    console.log('TorrentClient: Couldn\'t open file: ', this.path + filename);
                     process.exit(1);
                 });
             // read from file block by block and compare with empty block
@@ -93,7 +93,7 @@ module.exports = class {
                     const blockSize = this.parser.getBlockSize(p, b);
                     const result = await filehandle.read(Buffer.alloc(blockSize), 0, blockSize, null)
                         .catch(() => {
-                            console.log('Couldn\'t read from file: ', this.path + filename);
+                            console.log('TorrentClient: Couldn\'t read from file: ', this.path + filename);
                             process.exit(1);
                         });
                     if (result.bytesRead != blockSize)
@@ -135,7 +135,7 @@ module.exports = class {
             if (file.size == 0) {
                 fs.open(this.path + filename, 'w+', (err, fd) => {
                     if (err) {
-                        console.log('Couldn\'t open file: ',  this.path + filename);
+                        console.log('TorrentClient: Couldn\'t open file: ',  this.path + filename);
                         process.exit(1);
                     }
                     file.fd = fd;
@@ -146,13 +146,13 @@ module.exports = class {
             else {
                 await fpromise.rename(this.path + filename, this.path + filename + '(temp)')
                     .catch(err => {
-                        console.log('Couldn\'t rename file: ',  this.path + filename);
+                        console.log('TorrentClient: Couldn\'t rename file: ',  this.path + filename);
                         console.log(err);
                         process.exit(1);
                     });
                 fs.open(this.path + filename, 'w+', (err, fd) => {
                     if (err) {
-                        console.log('Couldn\'t open file: ',  this.path + filename);
+                        console.log('TorrentClient: Couldn\'t open file: ',  this.path + filename);
                         process.exit(1);
                     }
                     const readable = fs.createReadStream( this.path + filename + '(temp)');
@@ -161,7 +161,7 @@ module.exports = class {
                     readable.on('end', async () => {
                         await fpromise.unlink(this.path + filename + '(temp)')
                             .catch(err => {
-                                console.log('Couldn\'t delete file: ',  this.path + filename + '(temp)');
+                                console.log('TorrentClient: Couldn\'t delete file: ',  this.path + filename + '(temp)');
                                 console.log(err);
                                 process.exit(1);
                             });
@@ -183,7 +183,7 @@ module.exports = class {
         const length = piece.block.length + byteStart > file.byteEnd ? file.byteEnd - byteStart + 1 : piece.block.length;
         fs.write(file.fd, piece.block, offset, length - offset, position, err => {
             if (err) {
-                console.log('Couldn\'t write to file: ', this.path + filename);
+                console.log('TorrentClient: Couldn\'t write to file: ', this.path + filename);
                 process.exit(1);
             }
 
