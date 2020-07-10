@@ -94,11 +94,13 @@ module.exports = class {
     async convertVideo() {
         if (this.status == 'converting') return ;
         
-        console.log('Stream: Converting video');
+        // console.log('Stream: Converting video');
         this.status = 'converting';
+        const offset = await this.countOffset().catch(() => {});
+        console.log('offset: ', offset);
         let options = [
             '-i', this.path + this.files.movie,
-            '-ss', await this.countOffset().catch(() => {}),
+            '-ss', offset,
             '-c:v', 'libx264',
             '-b:v', '1000k',
             '-c:a', 'aac',
@@ -110,42 +112,28 @@ module.exports = class {
             this.path + this.settings.manifest
         ];
         const process = spawn('ffmpeg', options);
-        process.stdout.on('data', (data) => {
-            // console.log(data);
-            this.checkManifest();
-        });
-        process.stderr.setEncoding('utf8');
-        process.stderr.on('data', (data) => {
-            // console.log(data);
-            this.checkManifest();
-        });
+        process.stdout.on('data', () => this.checkManifest());
+        process.stderr.on('data', () => this.checkManifest());
         process.on('close', () => {
             this.status = 'idle';
-            console.log('Stream: End converting video');
+            // console.log('Stream: End converting video');
         });
     }
 
     countOffset() {
         return new Promise(resolve => {
-            fs.open(this.path + this.settings.manifest, 'r', (err, fd) => {
-                if (err) resolve(0);
-                else {
-                    fs.readFile(fd, (err, data) => {
-                        if (err) {
-                            console.log('Stream: Couldn\'t read file: ', this.path + this.settings.manifest);
-                            process.exit(1);
-                        }
-                        data = data.toString();
-                        const pattern = /#EXTINF:(?<duration>\d+\.\d+)/g;
-                        const result = [...data.matchAll(pattern)];
-                        let duration = 0;
-                        for (let i = 0; i < result.length; i++){
-                            duration += parseFloat(result[i][1]);
-                        }
-                        resolve(duration);
-                    });
+            fs.exists(this.path + this.settings.manifest, exists => {
+                if (!exists) return (resolve(0));
+
+                const data = fs.readFileSync(this.path + this.settings.manifest).toString();
+                const pattern = /#EXTINF:(?<duration>\d+\.\d+)/g;
+                const result = [...data.matchAll(pattern)];
+                let duration = 0;
+                for (let i = 0; i < result.length; i++){
+                    duration += parseFloat(result[i][1]);
                 }
-            })            
+                resolve(duration);
+            });
         });
     }
 

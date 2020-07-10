@@ -19,7 +19,7 @@ app.get('/movie', async (req, res) => {
             stream.createPlaylist();
             await torrent.download(stream.files.subtitles).catch(() => {});
             await stream.convertSubtitles().catch(() => {});
-            torrent.download(stream.files.movie);
+            torrent.download(stream.files.movie).then(() => torrent.close());
             torrent.events.on('piece-written', () => stream.convertVideo());
             torrent.events.on('files-checked', () => stream.convertVideo());
             stream.events.on('manifest-created',

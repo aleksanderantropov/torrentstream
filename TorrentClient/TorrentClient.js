@@ -94,9 +94,7 @@ module.exports = class {
             this.events.emit('files-checked');
             if (status == 'downloaded') {
                 this.write('Download complete.');
-                this.trackers.close();
-                resolve(1);
-                return ;
+                return (resolve(1));
             }
 
             this.write('Creating files.');
@@ -126,8 +124,6 @@ module.exports = class {
             });
             this.files.events.on( 'finish', () => {
                 this.write('Download complete.');
-                this.peers.close();
-                this.trackers.close();
                 this.files.close(filename);
                 resolve(1);
             });
@@ -139,5 +135,10 @@ module.exports = class {
         if (clear)
             process.stdout.write(this.buffer);
         process.stdout.write('\rTorrentClient: ' + message + '\r');
+    }
+
+    close() {
+        this.peers.close();
+        this.trackers.close();
     }
 }
