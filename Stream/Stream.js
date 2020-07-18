@@ -6,6 +6,7 @@ module.exports = class {
     constructor() {
         this.status = 'idle';
         this.ready = false;
+        this.downloaded = 0;
 
         this.events = new Events();
 
@@ -92,32 +93,45 @@ module.exports = class {
     }
 
     async convertVideo() {
-        if (this.status == 'converting') return ;
+        if (this.status == 'idle' && this.downloaded > 1000000) {
+            console.log('Stream: Converting video');
+            this.status = 'converting';
+            const offset = await this.countOffset().catch(() => {});
+            // console.log('offset: ', offset);
+            let options = [
+                '-re', // read at native frame-rate; slow-down the reading
+                '-i', this.path + this.files.movie,
+                '-ss', offset,
+                '-r', 24, // framerate
+                '-g', 48, // group pictures
+                '-keyint_min', 24, // insert a key frame every 24 frames
+                '-c:v', 'libx264',
+                '-b:v', '1000k',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-f', 'hls',
+                '-hls_time', 4,
+                '-hls_playlist_type', 'event',
+                '-hls_flags', 'append_list+omit_endlist',
+                this.path + this.settings.manifest
+            ];
+            process = spawn('ffmpeg', options);
+            process.stdout.on('data', () => this.checkManifest());
+            process.stderr.on('data', () => this.checkManifest());
+            process.stdout.on('data', data => console.log(data));
+            process.stderr.setEncoding('utf8');
+            process.stderr.on('data', data => console.log(data));
+            process.on('close', () => {
+                this.status = 'idle';
+                setTimeout(() => this.convertVideo(), 5000);
+                console.log('Stream: End converting video');
+            });
+        } else
+            setTimeout(() => this.convertVideo(), 5000);
+    }
+
+    killConvertings() {
         
-        // console.log('Stream: Converting video');
-        this.status = 'converting';
-        const offset = await this.countOffset().catch(() => {});
-        console.log('offset: ', offset);
-        let options = [
-            '-i', this.path + this.files.movie,
-            '-ss', offset,
-            '-c:v', 'libx264',
-            '-b:v', '1000k',
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            '-f', 'hls',
-            '-hls_time', 4,
-            '-hls_playlist_type', 'event',
-            '-hls_flags', 'append_list+omit_endlist',
-            this.path + this.settings.manifest
-        ];
-        const process = spawn('ffmpeg', options);
-        process.stdout.on('data', () => this.checkManifest());
-        process.stderr.on('data', () => this.checkManifest());
-        process.on('close', () => {
-            this.status = 'idle';
-            // console.log('Stream: End converting video');
-        });
     }
 
     countOffset() {

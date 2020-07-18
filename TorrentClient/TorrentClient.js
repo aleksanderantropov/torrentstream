@@ -55,7 +55,7 @@ module.exports = class {
                 // print progress
                 const received = this.blocks.received.reduce( (total, blocks) => blocks.filter(b => b).length + total, 0);
                 const percent = Math.floor(received / this.total * 100);
-                this.write('Complete: ' + percent + '% [' + received + ' / ' + this.total + ']', false);
+                // this.write('Complete: ' + percent + '% [' + received + ' / ' + this.total + ']', false);
                 this.events.emit('piece-written');
             });
             resolve();
@@ -63,35 +63,50 @@ module.exports = class {
     }
 
     getPeers() {
-        return new Promise(async resolve => {
+        return new Promise(resolve => {
+            // connect to tracker and get peers
+            this.write('Requesting peers from trackers.');
+            this.trackers.connect();
+            // output peers to a file
+            this.peers.events.on( 'peers-added', () => 
+                fs.writeFile(
+                    this.files.path + 'peers.json', 
+                    JSON.stringify(this.peers.outputList),
+                    () => {
+                        this.trackers.close();
+                        resolve();
+                    }
+                )
+            );
+        });
+    }
+
+    loadPeers() {
+        return new Promise(resolve => {
             // load peers from file if exists
             const downloadDir = this.path + '/' + this.parser.torrent.info.name;
             fs.readFile(downloadDir + '/peers.json', (err, data) => {
+                if (err) throw new Error('Couldn\'t read from file: ', downloadDir + '/peers.json');
                 if (!err) {
                     try {
                         this.write('Uploading peers from a file.');
                         const decoded = JSON.parse(data.toString());
                         this.peers.add(decoded);
                     } catch (e) {
-                        this.write('Couldn\'t parse JSON file: ', downloadDir + '/peers.json');
+                        throw new Error('Couldn\'t parse JSON file: ', downloadDir + '/peers.json');
                     }
                 }
+                resolve();
             });
-
-            // connect to tracker and get peers
-            this.write('Requesting peers from trackers.');
-            this.trackers.connect();
-            // output peers to a file
-            this.peers.events.on( 'peers-added', () => fs.writeFile(this.files.path + 'peers.json', JSON.stringify(this.peers.outputList), () => resolve()) );
         });
     }
 
     download(filename) {
         return new Promise(async resolve => {
-            this.write('Checking files.');
+            this.write('Checking files: ', filename);
             // check if file exists and how much data we already have
             const status = await this.files.checkFile(filename).catch((err) => console.log(err));
-            this.events.emit('files-checked');
+            this.events.emit('files-checked', this.files.details[filename].size);
             if (status == 'downloaded') {
                 this.write('Download complete.');
                 return (resolve(1));
@@ -105,9 +120,12 @@ module.exports = class {
             this.total = this.blocks.received.reduce( (total, blocks) => blocks.length + total, 0);
 
             this.write('Connecting to peers.');
-            this.peers.connect();
+            this.loadPeers()
+                .then(() => this.peers.connect())
+                .catch(err => this.write(err));
 
-            // rerequest new peers
+            // request new peers
+            this.trackers.connect();
             this.trackers.rerequest();
 
             // events
@@ -124,6 +142,8 @@ module.exports = class {
             });
             this.files.events.on( 'finish', () => {
                 this.write('Download complete.');
+                this.peers.close();
+                this.trackers.close();
                 this.files.close(filename);
                 resolve(1);
             });
@@ -135,10 +155,5 @@ module.exports = class {
         if (clear)
             process.stdout.write(this.buffer);
         process.stdout.write('\rTorrentClient: ' + message + '\r');
-    }
-
-    close() {
-        this.peers.close();
-        this.trackers.close();
     }
 }

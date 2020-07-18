@@ -1,6 +1,5 @@
 const events = require('events');
 const net = require('net');
-const { exit } = require('process');
 
 module.exports = class {
     constructor(requests, blocks, parser) {
@@ -53,6 +52,7 @@ module.exports = class {
                 p.connected = false;
             }
         });
+        this.list = [];
     }
 }
 
@@ -137,18 +137,22 @@ class Peer {
     }
     // we received a piece, add to received, write to file, check if we are all done, request next
     pieceHandler(piece) {
-        // add to received
-        this.blocks.received[piece.index][piece.begin / this.parser.BLOCK_SIZE] = true;
-        // emit event to write piece in outer function
-        this.events.emit('piece-received', piece);
-        // check if we are done
-        if ( this.blocks.complete() ) {
-            // we are done
-            return ;
-        }
-        else if ( this.blocks.lost ) {
-            // add missing to queue
-            this.blocks.missing().forEach( piece => this.queueAdd(piece) );
+        const bindex = piece.begin / this.parser.BLOCK_SIZE;
+        // if we haven't received it yet
+        if (!this.blocks.received[piece.index][bindex]) {
+            // add to received
+            this.blocks.received[piece.index][bindex] = true;
+            // emit event to write piece in outer function
+            this.events.emit('piece-received', piece);
+            // check if we are done
+            if ( this.blocks.complete() ) {
+                // we are done
+                return ;
+            }
+            else if ( this.blocks.lost.length ) {
+                // add lost to queue
+                this.queueAddLost();
+            }
         }
         this.requestNext();
     }
@@ -162,8 +166,10 @@ class Peer {
             // block index
             const bindex = piece.begin / this.parser.BLOCK_SIZE;
             if ( this.blocks.needed( piece.index, bindex ) ) {
+                // console.log('requested: ', piece.index, bindex);
                 this.socket.write( this.requests.piece(piece) );
                 this.blocks.requested[piece.index][bindex] = true;
+                this.trackLost(piece.index, bindex);
                 break ;
             }
         }
@@ -180,4 +186,27 @@ class Peer {
             });
         }
     }
+    
+    trackLost(pindex, bindex) {
+        setTimeout(() => {
+            if (!this.blocks.received[pindex][bindex]) {
+                // console.log('lost: ', pindex, bindex);
+                this.blocks.requested[pindex][bindex] = false;
+                this.blocks.lost.push({pindex: pindex, bindex: bindex});
+            }
+        }, 3000);
+    }
+
+    queueAddLost() {
+        while ( this.blocks.lost.length ) {
+            const piece = this.blocks.lost.shift();
+            // console.log('Adding to queue start: ', piece.pindex, piece.bindex);
+            this.queue.unshift({
+                index: piece.pindex,
+                begin: piece.bindex * this.parser.BLOCK_SIZE,
+                length: this.parser.getBlockSize(piece.pindex, piece.bindex)
+            });
+        }
+    }
+
 }

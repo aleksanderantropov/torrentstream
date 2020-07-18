@@ -131,6 +131,7 @@ async function convertVideo(path, video, subtitles) {
         '-b:a', '128k',
         '-f', 'hls',
         '-hls_time', 4,
+        '-hls_init_time', 10,
         '-hls_playlist_type', 'event',
         '-hls_flags', 'append_list+omit_endlist',
         path + 'hls.m3u8'
