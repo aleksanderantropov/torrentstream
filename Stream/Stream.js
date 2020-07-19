@@ -1,11 +1,14 @@
 const fs = require('fs');
 const spawn = require('child_process').spawn;
 const Events = require('events');
+const { Stream } = require('stream');
+const { Console } = require('console');
 
 module.exports = class {
     constructor() {
         this.status = 'idle';
         this.ready = false;
+        this.restart = true;
         this.downloaded = 0;
 
         this.events = new Events();
@@ -23,7 +26,8 @@ module.exports = class {
             playlist: "playlist.m3u8",
             patterns: {
                 movies: /.avi|.mp4|.mkv|.webm|.vob|.ogg|.ogv|.flv|.amv|.mov/,
-                subtitles: /.srt|.webvtt|.ass/
+                subtitles: /.srt|.webvtt|.ass/,
+                ffmpegoutput: /frame=\s*(?<frame>\S*)\s*fps=\s*(?<fps>\S*)\s*q=\s*(?<q>\S*)\s*size=\s*(?<size>\S*)\s*time=\s*(?<time>\S*)\s*bitrate=\s*(?<bitrate>\S*)\s*.*\s*speed=\s*(?<speed>\S*)/,
             }
         }
 
@@ -38,7 +42,8 @@ module.exports = class {
     initialize(torrent) {
         return new Promise(resolve => {
             const interval = setInterval(() => {
-                if (torrent.downloads && torrent.files.path) {
+                if (torrent && torrent.downloads && torrent.files.path) {
+                    this.torrent = torrent;
                     clearInterval(interval);
                     this.path = torrent.files.path;
 
@@ -52,6 +57,16 @@ module.exports = class {
                     resolve();
                 }
             }, 1000);
+        });
+    }
+
+    finalizeManifest() {
+        fs.readFile(this.path + this.settings.manifest, (err, data) => {
+            if (!err) {
+                data = data.toString();
+                data += '#EXT-X-ENDLIST\n';
+                fs.writeFile(this.path + this.settings.manifest, data, (err) => {});
+            }
         });
     }
 
@@ -84,8 +99,8 @@ module.exports = class {
                 '-i', this.path + temp,
                 this.path + this.settings.subtitles
             ];
-            const process = spawn('ffmpeg', options);
-            process.on('close', () => {
+            this.process = spawn('ffmpeg', options);
+            this.process.on('close', () => {
                 this.subtitles = this.settings.subtitles;
                 resolve();
             });
@@ -93,19 +108,30 @@ module.exports = class {
     }
 
     async convertVideo() {
-        if (this.status == 'idle' && this.downloaded > 1000000) {
+        const isFinalized = await new Promise(resolve => {
+            fs.readFile(this.path + this.settings.manifest, (err, data) => {
+                if (!err && data.toString().match(/#EXT-X-ENDLIST/)) resolve(true);
+                else resolve(false);
+            })
+        });
+
+        if (isFinalized)
+            this.events.emit('manifest-created');
+        else if (this.status == 'idle' && this.downloaded > 1000000) {
             console.log('Stream: Converting video');
             this.status = 'converting';
             const offset = await this.countOffset().catch(() => {});
-            // console.log('offset: ', offset);
+            console.log('offset: ', offset);
+
             let options = [
-                '-re', // read at native frame-rate; slow-down the reading
+                // '-re', // read at native frame-rate; slow-down the reading
                 '-i', this.path + this.files.movie,
                 '-ss', offset,
                 '-r', 24, // framerate
                 '-g', 48, // group pictures
                 '-keyint_min', 24, // insert a key frame every 24 frames
                 '-c:v', 'libx264',
+                // '-preset', 'fast',
                 '-b:v', '1000k',
                 '-c:a', 'aac',
                 '-b:a', '128k',
@@ -115,23 +141,35 @@ module.exports = class {
                 '-hls_flags', 'append_list+omit_endlist',
                 this.path + this.settings.manifest
             ];
-            process = spawn('ffmpeg', options);
-            process.stdout.on('data', () => this.checkManifest());
-            process.stderr.on('data', () => this.checkManifest());
-            process.stdout.on('data', data => console.log(data));
-            process.stderr.setEncoding('utf8');
-            process.stderr.on('data', data => console.log(data));
-            process.on('close', () => {
-                this.status = 'idle';
-                setTimeout(() => this.convertVideo(), 5000);
-                console.log('Stream: End converting video');
+            
+            this.process = spawn('ffmpeg', options);
+            this.process.stderr.on('data', () => this.checkManifest());
+            this.process.stderr.setEncoding('utf8');
+            this.process.stderr.on('data', data => {
+                console.log(data);
             });
-        } else
-            setTimeout(() => this.convertVideo(), 5000);
+            this.process.on('close', (code, signal) => {
+                console.log('Stream: End converting video');
+                if (signal == 'SIGTERM') {
+                    clearTimeout(this.videoTimer);
+                } else if (this.restart) {
+                    this.status = 'idle';
+                    this.videoTimer = setTimeout(() => this.convertVideo(), 5000);
+                } else {
+                    this.status = 'finished';
+                    this.finalizeManifest();
+                }
+            });
+        } else if (this.restart)
+            this.videoTimer = setTimeout(() => this.convertVideo(), 5000);
     }
 
-    killConvertings() {
-        
+    close() {
+        if (this.process)  {
+            console.log('KILL');
+            this.status = 'cancelled';
+            this.process.kill();
+        }
     }
 
     countOffset() {

@@ -7,10 +7,11 @@ const socks5 = require('socks5-http-client');
 const proxy = require('../proxy');
 
 module.exports = class {
-    constructor(torrent, requests, peers) {
+    constructor(torrent, requests, peers, files) {
         this.requests = requests;
         this.events = new events();
         this.peers = peers;
+        this.files = files;
         this.urls = [];
 
         this.urls.push( url.parse( torrent.announce.toString() ) );
@@ -26,15 +27,12 @@ module.exports = class {
 
     // connect to trackers
     connect() {
-        this.urls.forEach( url => this.trackers.push( new Tracker(url, this.requests, this.peers, this.events, this.retries) ) );
-    }
-    // rerequest new peers after a timeout
-    rerequest() {
-        this.trackers.forEach( tracker => tracker.rerequest() );
+        this.urls.forEach( url => this.trackers.push( new Tracker(url, this.requests, this.peers, this.events, this.retries, this.files) ) );
     }
     close() {
+        console.log('close');
         this.trackers.forEach( tracker => {
-            clearTimeout(tracker.timeout);
+            clearTimeout(tracker.timer);
             if (tracker.socket) tracker.socket.close();
         });
         this.trackers = [];
@@ -42,15 +40,16 @@ module.exports = class {
 }
 
 class Tracker {
-    constructor(url, requests, peers, events, retries) {
+    constructor(url, requests, peers, events, retries, files) {
         this.url = url;
         this.requests = requests;
         this.peers = peers;
         // connection retries
         this.retries = retries;
         // rerequest interval
-        this.interval = 15000;
+        this.interval = 10000;
         this.events = events;
+        this.files = files;
 
         if (url.protocol == 'udp:') {
             this.socket = dgram.createSocket('udp4')
@@ -100,6 +99,7 @@ class Tracker {
                     }
                 });
             this.peers.add(peers);
+            this.rerequest();
         }
     }
     // send http announce request
@@ -115,7 +115,6 @@ class Tracker {
         }).on('error', () => {
             this.events.emit('connect-fail');
         });
-        
     }
     // manage http response
     manageHttp(data) {
@@ -129,6 +128,7 @@ class Tracker {
                 }
             });
         this.peers.add(peers);
+        this.rerequest();
     }
     // convert response buffer into an array
     groupPeers(response) {
@@ -139,12 +139,10 @@ class Tracker {
         return peers;
     }
     // rerequest new peers
-    rerequest(left, downloaded) {
-        if (!this.interval) return ;
-        clearTimeout(this.timeout);
-        this.timeout = setTimeout( ()=> {
+    rerequest() {
+        this.timer = setTimeout( ()=> {
             if (this.url.protocol == 'udp:' && this.connectionId)
-                this.sendUdp( this.requests.announceUdp(this.connectionId, left, downloaded) );
+                this.sendUdp( this.requests.announceUdp(this.connectionId, this.files.left, this.files.downloaded) );
 
             if (this.url.protocol == 'http:')
                 this.sendHttp(this.httpOptions);

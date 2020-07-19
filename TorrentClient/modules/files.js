@@ -34,7 +34,6 @@ module.exports = class {
         parser.torrent.info.files.forEach(file => {
             this.details[file.path.toString()] = {
                 fd: null,
-                finished: false,
                 size: 0,
                 length: file.length,
                 byteStart: byteStart,
@@ -128,8 +127,7 @@ module.exports = class {
 
     async createFile(filename) {
         console.log('Creating file: ', filename);
-        this.details[filename].finished = false;
-        return new Promise(async resolve => {
+        return new Promise(async (resolve, reject) => {
             const file = this.details[filename];
 
             // create file
@@ -145,17 +143,20 @@ module.exports = class {
             }
             // copy file
             else {
-                await fpromise.rename(this.path + filename, this.path + filename + '(temp)')
-                    .catch(err => {
-                        console.log('TorrentClient: Couldn\'t rename file: ',  this.path + filename);
-                        console.log(err);
-                        process.exit(1);
-                    });
+                const result = await fpromise.rename(this.path + filename, this.path + filename + '(temp)')
+                    .catch(() => false);
+                
+                if (result === false) {
+                    reject('CNTRM');
+                    return ;
+                }
+
                 fs.open(this.path + filename, 'w+', (err, fd) => {
                     if (err) {
-                        console.log('TorrentClient: Couldn\'t open file: ',  this.path + filename);
-                        process.exit(1);
+                        reject('CNTOPN');
+                        return ;
                     }
+
                     const readable = fs.createReadStream( this.path + filename + '(temp)');
                     const writable = fs.createWriteStream('', {fd: fd, autoClose: false});
                     readable.pipe(writable);
@@ -175,9 +176,10 @@ module.exports = class {
     }
 
     writeFile(filename, piece) {
-        if (this.details[filename].finished) return ;
-
         const file = this.details[filename];
+
+        if (file.fd === null) return ;
+        
         const byteStart = piece.index * this.parser.details.pieceSize + piece.begin;
         const offset = byteStart < file.byteStart ? file.byteStart - byteStart : 0;
         const position = byteStart - file.byteStart + offset;
@@ -186,7 +188,7 @@ module.exports = class {
         fs.write(file.fd, piece.block, offset, length - offset, position, err => {
             if (err) {
                 console.log('TorrentClient: Couldn\'t write to file: ', this.path + filename);
-                process.exit(1);
+                return ;
             }
 
             this.downloaded += length - offset;
@@ -198,13 +200,13 @@ module.exports = class {
             this.events.emit('piece-written', piece.index, blockIndex);
 
             if ( this.complete() ) {
-                this.details[filename].finished = true;
                 this.events.emit('finish');
             }
         });
     }
 
     close(filename) {
+        if (!this.details[filename] || this.details[filename].fd === null) return ;
         fs.close( this.details[filename].fd, (err) => {
             if (err) {
                 console.log('Couldn\'t close file: ', this.path + filename);

@@ -28,13 +28,13 @@ module.exports = class {
             this.blocks = new Blocks( this.parser );
             // create files
             this.files = new Files(this.path, this.blocks, this.parser);
-            // this.left = this.parser.details.sizeNumber;
-            this.left = 82372;
+            this.left = this.parser.details.sizeNumber;
             // save file paths that we will download
             this.downloads = this.files.files.map(file => file.path.toString());
             this.requests = new Request(this.left, this.parser.details.hashedInfo);
             this.peers = new Peers(this.requests, this.blocks, this.parser);
-            this.trackers = new Trackers(this.parser.torrent, this.requests, this.peers);
+            this.trackers = new Trackers(this.parser.torrent, this.requests, this.peers, this.files);
+            this.peers.settings.maxEmptyConnects = this.trackers.urls.length  * 2;
             // create path and project folder
             await fpromise.mkdir(this.files.path, {recursive: true})
                 .catch(() => {
@@ -72,10 +72,7 @@ module.exports = class {
                 fs.writeFile(
                     this.files.path + 'peers.json', 
                     JSON.stringify(this.peers.outputList),
-                    () => {
-                        this.trackers.close();
-                        resolve();
-                    }
+                    () => resolve()
                 )
             );
         });
@@ -102,7 +99,7 @@ module.exports = class {
     }
 
     download(filename) {
-        return new Promise(async resolve => {
+        return new Promise(async (resolve, reject) => {
             this.write('Checking files: ', filename);
             // check if file exists and how much data we already have
             const status = await this.files.checkFile(filename).catch((err) => console.log(err));
@@ -114,28 +111,22 @@ module.exports = class {
 
             this.write('Creating files.');
             // if something needs to be downloaded, create fds for writing
-            await this.files.createFile(filename).catch((err) => console.log(err));
+            await this.files.createFile(filename).catch(err => reject(err) );
 
             // for stats
             this.total = this.blocks.received.reduce( (total, blocks) => blocks.length + total, 0);
 
             this.write('Connecting to peers.');
             this.loadPeers()
-                .then(() => this.peers.connect())
                 .catch(err => this.write(err));
 
             // request new peers
             this.trackers.connect();
-            this.trackers.rerequest();
 
             // events
             this.peers.events.on( 'peers-added', () => {
-                if (!this.files.downloaded) {
-                    this.write('Connecting to peers.');
-                    this.peers.connect();
-                    // rerequest new peers after a timeout
-                    this.trackers.rerequest(this.files.left, this.files.downloaded);
-                }
+                this.write('Connecting to peers.');
+                if ( this.peers.connect() == -1) reject('CNTCNNCT');
             });
             this.peers.events.on( 'piece-received', piece => {
                 this.files.writeFile(filename, piece);
@@ -155,5 +146,11 @@ module.exports = class {
         if (clear)
             process.stdout.write(this.buffer);
         process.stdout.write('\rTorrentClient: ' + message + '\r');
+    }
+
+    close(filename) {
+        this.peers.close();
+        this.trackers.close();
+        this.files.close(filename);
     }
 }

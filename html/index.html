@@ -6,6 +6,9 @@
 </head>
 <body>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
         .player {
             width: 640px;
             height: 360px;
@@ -15,26 +18,31 @@
             background: #000;
             cursor: pointer;
         }
-        .player_empty:before,
-        .player_empty:after {
-            content: '';
+        .player__button, .player__errors {
             display: block;
             position: absolute;
             top: 50%;
             left: 50%;
+            transform: translate(-50%, -50%);
         }
-        .player_empty:hover:before,
-        .player_empty:hover:after {
+        .player__errors {
+            color: #fff;
+        }
+        .player_empty:hover .player__button {
             opacity: .8;
         }
-        .player_empty:before {
-            transform: translate(-50%, -50%);
+        .player__button_play {
             border-radius: 50%;
             border: 2px #ccc solid;
             width: 50px;
             height: 50px;
         }
-        .player_empty:after {
+        .player__button_play:before {
+            content: '';
+            display: block;
+            position: absolute;
+            top: 50%;
+            left: 50%;
             transform: translate(-35%, -50%);
             width: 0;
             height: 0;
@@ -42,13 +50,80 @@
             border-width: 12.5px 0 12.5px 25px;
             border-color: transparent transparent transparent #fff;
         }
+        .player__button_loading {
+            display: inline-block;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+        }
+        .player__button_loading div {
+            box-sizing: border-box;
+            display: block;
+            position: absolute;
+            width: 64px;
+            height: 64px;
+            margin: 8px;
+            border: 4px solid #fff;
+            border-radius: 50%;
+            animation: player__button_loading 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+            border-color: #fff transparent transparent transparent;
+        }
+        .player__button_loading div:nth-child(1) {
+            animation-delay: -0.45s;
+        }
+        .player__button_loading div:nth-child(2) {
+            animation-delay: -0.3s;
+        }
+        .player__button_loading div:nth-child(3) {
+            animation-delay: -0.15s;
+        }
+        @keyframes player__button_loading {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
     </style>
-    <div id="errors"></div>
-    <div id="container" class="player player_empty"></div>
+    <div id="container" class="player player_empty">
+        <div class="player__button"><div></div><div></div><div></div><div></div></div>
+        <div class="player__errors"></div>
+    </div>
     <script>
+        class PlayButton {
+            constructor() {
+                this.element = document.querySelector('.player__button');
+                this.element.classList.add('player__button_play');
+            }
+
+            loading() {
+                this.element.classList.remove('player__button_play');
+                this.element.classList.add('player__button_loading');
+            }
+
+            play() {
+                this.element.classList.remove('player__button_loading');
+                this.element.classList.add('player__button_play');
+            }
+
+            remove() {
+                this.element.remove();
+            }
+        }
+
         const placeholder = document.querySelector('.player_empty');
+        const errors = document.querySelector('.player__errors');
+        const playButton = new PlayButton();
+
         placeholder.onclick = event => {
             placeholder.onclick = null;
+
+            playButton.loading();
+
             fetch('?action=play')
                 .then(response => response.json())
                 .then(response => {
@@ -56,19 +131,35 @@
                     if (response.errors) {
                         errors.innerHTML = "";
                         response.errors.forEach(error => errors.insertAdjacentHTML('beforeEnd', "<p>" + error + "</p>"));
+                        playButton.remove();
                     } else {
                         const path = "http://localhost/" + response.path.substring( response.path.indexOf('video/') + 'video/'.length );
-                        container.insertAdjacentHTML('afterBegin', "<video id='video' controls width='640' height='360'> <track src='" + path + response.subtitles + "' label='English' > </video>" );
+                        container.insertAdjacentHTML(
+                            'afterBegin',
+                            "<video id='video' controls width='640' height='360'>" + 
+                            (response.subtitles ? "<track src='" + path + response.subtitles + "' label='English' >" : "") +
+                            "</video>"
+                        );
                         const video = document.getElementById("video");
                         const hls = new Hls();
                         hls.loadSource(path + response.playlist);
                         hls.attachMedia(video);
                         hls.on(Hls.Events.ERROR, (event, data) => console.log(event, data));
                         
+                        playButton.remove();
                         placeholder.classList.remove('player_empty');
                     }
                 });
+
+            // setInterval(() => {
+            //     console.log('heartbeat');
+            //     fetch('?action=heartbeat');
+            // }, 5000);
         }
+
+        // window.onbeforeunload = () => {
+        //     fetch('?action=die');
+        // }
     </script>
 </body>
 </html>

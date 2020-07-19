@@ -3,12 +3,16 @@ const net = require('net');
 
 module.exports = class {
     constructor(requests, blocks, parser) {
+        this.settings = {
+            maxEmptyConnects: 5
+        }
         this.requests = requests;
         this.blocks = blocks;
         this.parser = parser;
         this.list = [];
         this.outputList = [];
         this.events = new events();
+        this.connects = 0;
     }
 
     // add new peers, filter out duplicates
@@ -34,14 +38,27 @@ module.exports = class {
     }
 
     connect() {
+        let connections = 0; //debug
         this.list.forEach( p => {
             if ( !p.connected ) {
+                connections++; //debug
                 p.peer = new Peer(this.requests, this.blocks, this.parser);
                 p.peer.connect(p.ip, p.port);
                 p.connected = true;
                 p.peer.events.on('piece-received', piece => this.events.emit('piece-received', piece));
+                p.peer.socket.on('close', () => {
+                    p.connected = false;
+                    this.requests.generateId();
+                });
             }
         });
+
+        if (this.connects >= this.settings.maxEmptyConnects) {
+            if ( this.list.filter(peer => !peer.peer.choked).length == 0 ) return (-1);
+        } else 
+            this.connects++;
+
+        console.log('Connected to new peers: ' + connections);
     }
     
     // close peer connections
@@ -58,6 +75,9 @@ module.exports = class {
 
 class Peer {
     constructor(requests, blocks, parser) {
+        this.settings =  {
+            lostTimeout: 3000,
+        };
         this.events = new events();
         this.requests = requests;
         this.blocks = blocks;
@@ -70,10 +90,10 @@ class Peer {
         this.queue = [];
         // we are interested in what peer has
         this.interested = false;
+        this.socket = new net.Socket().on('error', () => {});
     }
 
     connect(ip, port) {
-        this.socket = new net.Socket().on('error', () => {});
         this.socket.connect(port, ip, () => this.socket.write( this.requests.handshake() ) );
         // we can receive data in chunks
         let buffer = Buffer.alloc(0);
@@ -118,6 +138,7 @@ class Peer {
     chokeHandler() {
         this.choked = true;
         this.queue = [];
+        this.socket.end();
     }
     // unchoke, add have to queue and request a piece
     unchokeHandler() {
@@ -193,8 +214,9 @@ class Peer {
                 // console.log('lost: ', pindex, bindex);
                 this.blocks.requested[pindex][bindex] = false;
                 this.blocks.lost.push({pindex: pindex, bindex: bindex});
+                this.chokeHandler();
             }
-        }, 3000);
+        }, this.settings.lostTimeout);
     }
 
     queueAddLost() {
@@ -208,5 +230,4 @@ class Peer {
             });
         }
     }
-
 }

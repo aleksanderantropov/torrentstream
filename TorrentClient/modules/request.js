@@ -10,6 +10,10 @@ module.exports = class {
         this.requests = requests;
     }
 
+    generateId() {
+        this.peerId = crypto.randomBytes(20);
+    }
+
     connectUdp() {
         const buffer = Buffer.alloc(16);
         // connection id
