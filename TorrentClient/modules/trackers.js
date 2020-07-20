@@ -30,7 +30,6 @@ module.exports = class {
         this.urls.forEach( url => this.trackers.push( new Tracker(url, this.requests, this.peers, this.events, this.retries, this.files) ) );
     }
     close() {
-        console.log('close');
         this.trackers.forEach( tracker => {
             clearTimeout(tracker.timer);
             if (tracker.socket) tracker.socket.close();

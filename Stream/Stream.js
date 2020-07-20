@@ -3,14 +3,10 @@ const spawn = require('child_process').spawn;
 const Events = require('events');
 const { Stream } = require('stream');
 const { Console } = require('console');
+const { disconnect } = require('process');
 
 module.exports = class {
     constructor() {
-        this.status = 'idle';
-        this.ready = false;
-        this.restart = true;
-        this.downloaded = 0;
-
         this.events = new Events();
 
         this.settings = {
@@ -26,21 +22,35 @@ module.exports = class {
             playlist: "playlist.m3u8",
             patterns: {
                 movies: /.avi|.mp4|.mkv|.webm|.vob|.ogg|.ogv|.flv|.amv|.mov/,
-                subtitles: /.srt|.webvtt|.ass/,
-                ffmpegoutput: /frame=\s*(?<frame>\S*)\s*fps=\s*(?<fps>\S*)\s*q=\s*(?<q>\S*)\s*size=\s*(?<size>\S*)\s*time=\s*(?<time>\S*)\s*bitrate=\s*(?<bitrate>\S*)\s*.*\s*speed=\s*(?<speed>\S*)/,
+                subtitles: /.srt|.webvtt|.ass/
+            },
+            ffmpeg: {
+                hls_time: 4,
+                entriesThreshold: 10,
+                discontinuityThreshold: 3,
+                patterns: {
+                    duration: /#EXTINF:(?<duration>\d+\.\d+)/g,
+                    discontinuity: /#EXT-X-DISCONTINUITY/g
+                }
             }
         }
 
         this.path = null;
         this.files = null;
+        this.playlist = null;
 
         // converted subtitles
         this.subtitles = null;
-        this.playlist = null;
     }
 
     initialize(torrent) {
-        return new Promise(resolve => {
+        return new Promise( (resolve, reject) => {
+            this.status = 'idle';
+            this.ready = false;
+            this.restart = true;
+            this.downloaded = 0;
+            this.slowConversion = false;
+
             const interval = setInterval(() => {
                 if (torrent && torrent.downloads && torrent.files.path) {
                     this.torrent = torrent;
@@ -48,7 +58,7 @@ module.exports = class {
                     this.path = torrent.files.path;
 
                     const movies = torrent.downloads.filter(file => file.match(this.settings.patterns.movies))
-                    this.errors = movies.length ? [] : ['Video format is not supported.'];
+                    if (!movies.length) return reject('NKNWNFRMT');
             
                     this.files = {
                         movie: movies.length ? movies[0] : null,
@@ -71,19 +81,24 @@ module.exports = class {
     }
 
     createPlaylist() {
-        const data =
+        return new Promise( (resolve, reject) => {
+            const data =
             "#EXTM3U\n" +
             "#EXT-X-VERSION:3\n" +
             '#EXT-X-STREAM-INF:BANDWIDTH=' + this.settings.bandwidth["1000k"] +
             ',CODECS="' + this.settings.codecs["h.264 High"] + ',' + this.settings.codecs["aac"] + '"\n' +
             this.settings.manifest + "\n\n";
 
-        fs.exists(this.path + this.settings.playlist, exists => {
-            if (exists) return (this.playlist = this.settings.playlist);
-
-            fs.writeFile(this.path + this.settings.playlist, data, (err) => {
-                if (err) console.log('Stream: Couldn\'t create playlist: ', this.path + this.settings.playlist);
+            fs.exists(this.path + this.settings.playlist, exists => {
                 this.playlist = this.settings.playlist;
+                if (exists) 
+                    resolve();
+                else
+                    fs.writeFile(this.path + this.settings.playlist, data, (err) => {
+                        if (err)
+                            return reject('CNTCRT');
+                        resolve();
+                    });
             });
         });
     }
@@ -120,11 +135,14 @@ module.exports = class {
         else if (this.status == 'idle' && this.downloaded > 1000000) {
             console.log('Stream: Converting video');
             this.status = 'converting';
-            const offset = await this.countOffset().catch(() => {});
-            console.log('offset: ', offset);
+
+            let offset, entries, discontinuity;
+            [offset, entries, discontinuity] = await this.parseManifest().catch(() => {});
+            // If there are a lot of underconverted pices (usually because of slow download rate), enable 're' mode that slows down conversion
+            if (this.slowConversion == false && entries <= this.settings.ffmpeg.entriesThreshold && discontinuity >= this.settings.ffmpeg.discontinuityThreshold)
+                this.slowConversion = true;
 
             let options = [
-                // '-re', // read at native frame-rate; slow-down the reading
                 '-i', this.path + this.files.movie,
                 '-ss', offset,
                 '-r', 24, // framerate
@@ -136,18 +154,21 @@ module.exports = class {
                 '-c:a', 'aac',
                 '-b:a', '128k',
                 '-f', 'hls',
-                '-hls_time', 4,
+                '-hls_time', this.settings.ffmpeg.hls_time,
+                '-hls_init_time', this.settings.ffmpeg.hls_time,
                 '-hls_playlist_type', 'event',
                 '-hls_flags', 'append_list+omit_endlist',
                 this.path + this.settings.manifest
             ];
+
+            if (this.slowConversion) options.unshift('-re');
             
             this.process = spawn('ffmpeg', options);
             this.process.stderr.on('data', () => this.checkManifest());
-            this.process.stderr.setEncoding('utf8');
-            this.process.stderr.on('data', data => {
-                console.log(data);
-            });
+
+            this.process.stderr.setEncoding('utf8'); // debug
+            this.process.stderr.on('data', data => console.log(data) ); // debug
+
             this.process.on('close', (code, signal) => {
                 console.log('Stream: End converting video');
                 if (signal == 'SIGTERM') {
@@ -160,43 +181,46 @@ module.exports = class {
                     this.finalizeManifest();
                 }
             });
+
         } else if (this.restart)
             this.videoTimer = setTimeout(() => this.convertVideo(), 5000);
     }
 
     close() {
         if (this.process)  {
-            console.log('KILL');
             this.status = 'cancelled';
             this.process.kill();
         }
     }
 
-    countOffset() {
+    parseManifest() {
         return new Promise(resolve => {
             fs.exists(this.path + this.settings.manifest, exists => {
-                if (!exists) return (resolve(0));
+                if (!exists) return resolve( [0, 0, 0] );
 
                 const data = fs.readFileSync(this.path + this.settings.manifest).toString();
-                const pattern = /#EXTINF:(?<duration>\d+\.\d+)/g;
-                const result = [...data.matchAll(pattern)];
+                const discontinuityMatch = [ ...data.matchAll( this.settings.ffmpeg.patterns.discontinuity ) ];
+                console.log(data.matchAll( this.settings.ffmpeg.patterns.discontinuity ));
+
+                const durationMatch = [ ...data.matchAll( this.settings.ffmpeg.patterns.duration ) ];
+
                 let duration = 0;
-                for (let i = 0; i < result.length; i++){
-                    duration += parseFloat(result[i][1]);
+                for (var i = 0; i < durationMatch.length; i++){
+                    duration += parseFloat(durationMatch[i][1]);
                 }
-                resolve(duration);
+
+                resolve( [duration, i, discontinuityMatch.length] );
             });
         });
     }
 
     checkManifest() {
         if (this.ready === false) {
-            this.ready = true;
             fs.exists(this.path + this.settings.manifest, exists => {
-                if (exists)
+                if (exists) {
+                    this.ready = true;
                     this.events.emit('manifest-created');
-                else
-                    this.ready = false;
+                }
             });
         }
     }

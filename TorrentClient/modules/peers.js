@@ -10,29 +10,18 @@ module.exports = class {
         this.blocks = blocks;
         this.parser = parser;
         this.list = [];
-        this.outputList = [];
         this.events = new events();
         this.connects = 0;
     }
 
     // add new peers, filter out duplicates
     add(list) {
-        list = list.map(peer => {
-            return {
-                ip: peer.ip,
-                port: peer.port,
-                connected: null
-            }
-        });
         // filter leave only items that satisfy a condition
         this.list = this.list.concat(list).filter( (peer, index, self) =>
             // findIndex returns the index of the first element that satisfies testing function
             // therefore condition is only first indices of same peers
             index === self.findIndex( item => (item.port == peer.port && item.ip == peer.ip) )
         );
-        this.outputList = this.list.map(peer => {
-            return {ip: peer.ip, port: peer.port};
-        });
         // emit event (it's being listened to in client.js)
         this.events.emit('peers-added');
     }
@@ -40,36 +29,35 @@ module.exports = class {
     connect() {
         let connections = 0; //debug
         this.list.forEach( p => {
-            if ( !p.connected ) {
+            if ( !p.peer || !p.peer.connected ) {
                 connections++; //debug
                 p.peer = new Peer(this.requests, this.blocks, this.parser);
                 p.peer.connect(p.ip, p.port);
-                p.connected = true;
                 p.peer.events.on('piece-received', piece => this.events.emit('piece-received', piece));
-                p.peer.socket.on('close', () => {
-                    p.connected = false;
-                    this.requests.generateId();
-                });
             }
         });
 
         if (this.connects >= this.settings.maxEmptyConnects) {
-            if ( this.list.filter(peer => !peer.peer.choked).length == 0 ) return (-1);
+            if ( this.list.filter(peer => !peer.peer.choked).length == 0 ) {
+                console.log('Exceeded connections');
+                return (-1);
+            }
         } else 
             this.connects++;
 
-        console.log('Connected to new peers: ' + connections);
+        console.log('Connected to new peers: ' + connections); // debug
     }
     
     // close peer connections
     close() {
         this.list.forEach( p => {
-            if (p.connected) {
-                p.peer.socket.end();
-                p.connected = false;
+            if ( p.peer && p.peer.connected ) {
+                p.peer.chokeHandler();
+                clearTimeout(p.peer.lostTimer);
             }
         });
         this.list = [];
+        this.connects = 0;
     }
 }
 
@@ -91,6 +79,8 @@ class Peer {
         // we are interested in what peer has
         this.interested = false;
         this.socket = new net.Socket().on('error', () => {});
+        
+        this.connected = true;
     }
 
     connect(ip, port) {
@@ -107,6 +97,11 @@ class Peer {
                 buffer = buffer.slice(messageLength);
                 this.handshake = false;
             }
+        });
+        this.socket.on('close', () => {
+            this.connected = false;
+            this.requests.generateId();
+            this.socket.removeAllListeners('data');
         });
         // get length of the next message
         const getLength = () => {
@@ -142,10 +137,13 @@ class Peer {
     }
     // unchoke, add have to queue and request a piece
     unchokeHandler() {
+        const empty = !this.queue.length;
+
         this.choked = false;
         // fill queue with what we need
         this.blocks.missing().forEach( piece => this.queueAdd(piece) );
-        this.requestNext();
+
+        if (empty) this.requestNext();
     }
     forceDownloadHandler() {
         const empty = !this.queue.length;
@@ -159,21 +157,25 @@ class Peer {
     // we received a piece, add to received, write to file, check if we are all done, request next
     pieceHandler(piece) {
         const bindex = piece.begin / this.parser.BLOCK_SIZE;
+        
+        // clear timeout for lost
+        clearTimeout(this.lostTimer);
+        
         // if we haven't received it yet
         if (!this.blocks.received[piece.index][bindex]) {
             // add to received
             this.blocks.received[piece.index][bindex] = true;
             // emit event to write piece in outer function
             this.events.emit('piece-received', piece);
-            // check if we are done
-            if ( this.blocks.complete() ) {
-                // we are done
-                return ;
-            }
-            else if ( this.blocks.lost.length ) {
-                // add lost to queue
-                this.queueAddLost();
-            }
+        }
+        // check if we are done
+        if ( this.blocks.complete() ) {
+            // we are done
+            return ;
+        }
+        else if ( this.blocks.lost.length ) {
+            // add lost to queue
+            this.queueAddLost();
         }
         this.requestNext();
     }
@@ -187,7 +189,6 @@ class Peer {
             // block index
             const bindex = piece.begin / this.parser.BLOCK_SIZE;
             if ( this.blocks.needed( piece.index, bindex ) ) {
-                // console.log('requested: ', piece.index, bindex);
                 this.socket.write( this.requests.piece(piece) );
                 this.blocks.requested[piece.index][bindex] = true;
                 this.trackLost(piece.index, bindex);
@@ -209,9 +210,8 @@ class Peer {
     }
     
     trackLost(pindex, bindex) {
-        setTimeout(() => {
+        this.lostTimer = setTimeout(() => {
             if (!this.blocks.received[pindex][bindex]) {
-                // console.log('lost: ', pindex, bindex);
                 this.blocks.requested[pindex][bindex] = false;
                 this.blocks.lost.push({pindex: pindex, bindex: bindex});
                 this.chokeHandler();
@@ -222,7 +222,6 @@ class Peer {
     queueAddLost() {
         while ( this.blocks.lost.length ) {
             const piece = this.blocks.lost.shift();
-            // console.log('Adding to queue start: ', piece.pindex, piece.bindex);
             this.queue.unshift({
                 index: piece.pindex,
                 begin: piece.bindex * this.parser.BLOCK_SIZE,

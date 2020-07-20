@@ -205,15 +205,17 @@ module.exports = class {
         });
     }
 
-    close(filename) {
-        if (!this.details[filename] || this.details[filename].fd === null) return ;
-        fs.close( this.details[filename].fd, (err) => {
-            if (err) {
-                console.log('Couldn\'t close file: ', this.path + filename);
-                process.exit(1);
-            }
-            this.details[filename].fd = null;
-        });    
+    close() {
+        this.details.forEach(file => {
+            if (file.fd === null) return ;
+            fs.close( file.fd, (err) => {
+                if (err) {
+                    console.log('Couldn\'t close file: ');
+                    process.exit(1);
+                }
+                file.fd = null;
+            });    
+        })
     }
 
     complete() {

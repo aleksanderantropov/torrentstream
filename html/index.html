@@ -89,11 +89,17 @@
             }
         }
     </style>
+
     <div id="container" class="player player_empty">
         <div class="player__button"><div></div><div></div><div></div><div></div></div>
         <div class="player__errors"></div>
     </div>
+
+    <script src='/socket.io/socket.io.js'></script>
+
     <script>
+        const placeholder = document.querySelector('.player_empty');
+        const errors = document.querySelector('.player__errors');
         class PlayButton {
             constructor() {
                 this.element = document.querySelector('.player__button');
@@ -114,52 +120,48 @@
                 this.element.remove();
             }
         }
-
-        const placeholder = document.querySelector('.player_empty');
-        const errors = document.querySelector('.player__errors');
         const playButton = new PlayButton();
+
+        const socket = io({
+            query: {movie: 'movie', torrentFile: 'torrent-files/unnatural-causes.torrent'}
+        });
+
+        socket.on('errors', err => {
+            errors.innerHTML = "";
+            if (typeof err == 'object') {
+                errors.insertAdjacentHTML('beforeEnd', "<p>Internal Server Error</p>");
+            } else
+                err.forEach(error => errors.insertAdjacentHTML('beforeEnd', "<p>" + error + "</p>"));
+            playButton.remove();
+        });
+
+        socket.on('stream', stream => {
+            console.log(stream);
+
+            const path = "http://localhost/" + stream.path.substring( stream.path.indexOf('video/') + 'video/'.length );
+            container.insertAdjacentHTML(
+                'afterBegin',
+                "<video id='video' controls width='640' height='360'>" + 
+                (stream.subtitles ? "<track src='" + path + stream.subtitles + "' label='English' >" : "") +
+                "</video>"
+            );
+            const video = document.getElementById("video");
+            const hls = new Hls();
+            hls.loadSource(path + stream.playlist);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.ERROR, (event, data) => console.log(event, data));
+            
+            playButton.remove();
+            placeholder.classList.remove('player_empty');
+        });
 
         placeholder.onclick = event => {
             placeholder.onclick = null;
 
             playButton.loading();
 
-            fetch('?action=play')
-                .then(response => response.json())
-                .then(response => {
-                    console.log(response);
-                    if (response.errors) {
-                        errors.innerHTML = "";
-                        response.errors.forEach(error => errors.insertAdjacentHTML('beforeEnd', "<p>" + error + "</p>"));
-                        playButton.remove();
-                    } else {
-                        const path = "http://localhost/" + response.path.substring( response.path.indexOf('video/') + 'video/'.length );
-                        container.insertAdjacentHTML(
-                            'afterBegin',
-                            "<video id='video' controls width='640' height='360'>" + 
-                            (response.subtitles ? "<track src='" + path + response.subtitles + "' label='English' >" : "") +
-                            "</video>"
-                        );
-                        const video = document.getElementById("video");
-                        const hls = new Hls();
-                        hls.loadSource(path + response.playlist);
-                        hls.attachMedia(video);
-                        hls.on(Hls.Events.ERROR, (event, data) => console.log(event, data));
-                        
-                        playButton.remove();
-                        placeholder.classList.remove('player_empty');
-                    }
-                });
-
-            // setInterval(() => {
-            //     console.log('heartbeat');
-            //     fetch('?action=heartbeat');
-            // }, 5000);
+            socket.emit('play');
         }
-
-        // window.onbeforeunload = () => {
-        //     fetch('?action=die');
-        // }
     </script>
 </body>
 </html>
