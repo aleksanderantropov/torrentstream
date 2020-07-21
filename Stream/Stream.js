@@ -6,9 +6,9 @@ const { Console } = require('console');
 const { disconnect } = require('process');
 
 module.exports = class {
-    constructor() {
+    constructor(path, downloads) {
         this.events = new Events();
-
+    
         this.settings = {
             bandwidth: {
                 "1000k": 1240800
@@ -41,32 +41,32 @@ module.exports = class {
 
         // converted subtitles
         this.subtitles = null;
+        
     }
 
-    initialize(torrent) {
+    initialize(path, downloads) {
         return new Promise( (resolve, reject) => {
+            this.path = path;
+            this.downloads = downloads;
             this.status = 'idle';
             this.ready = false;
             this.restart = true;
             this.downloaded = 0;
             this.slowConversion = false;
 
-            const interval = setInterval(() => {
-                if (torrent && torrent.downloads && torrent.files.path) {
-                    this.torrent = torrent;
-                    clearInterval(interval);
-                    this.path = torrent.files.path;
-
-                    const movies = torrent.downloads.filter(file => file.match(this.settings.patterns.movies))
-                    if (!movies.length) return reject('NKNWNFRMT');
+            const movies = this.downloads.filter(file => file.match(this.settings.patterns.movies))
+            if (!movies.length) return reject('NKNWNFRMT');
+    
+            this.files = {
+                movie: movies.length ? movies[0] : null,
+                subtitles: this.downloads.filter(file => file.match(this.settings.patterns.subtitles))
+            }
             
-                    this.files = {
-                        movie: movies.length ? movies[0] : null,
-                        subtitles: torrent.downloads.filter(file => file.match(this.settings.patterns.subtitles))
-                    }
-                    resolve();
-                }
-            }, 1000);
+            fs.readFile(this.path + this.settings.manifest, (err, data) => {
+                this.converted = !err && data.toString().match(/#EXT-X-ENDLIST/) !== null;
+                console.log('converted: ' + this.converted);
+                resolve();
+            });
         });
     }
 
@@ -91,12 +91,10 @@ module.exports = class {
 
             fs.exists(this.path + this.settings.playlist, exists => {
                 this.playlist = this.settings.playlist;
-                if (exists) 
-                    resolve();
+                if (exists) resolve();
                 else
                     fs.writeFile(this.path + this.settings.playlist, data, (err) => {
-                        if (err)
-                            return reject('CNTCRT');
+                        if (err) return reject('CNTCRT');
                         resolve();
                     });
             });
@@ -123,21 +121,14 @@ module.exports = class {
     }
 
     async convertVideo() {
-        const isFinalized = await new Promise(resolve => {
-            fs.readFile(this.path + this.settings.manifest, (err, data) => {
-                if (!err && data.toString().match(/#EXT-X-ENDLIST/)) resolve(true);
-                else resolve(false);
-            })
-        });
-
-        if (isFinalized)
-            this.events.emit('manifest-created');
+        if (this.converted) this.events.emit('manifest-created');
         else if (this.status == 'idle' && this.downloaded > 1000000) {
             console.log('Stream: Converting video');
             this.status = 'converting';
 
             let offset, entries, discontinuity;
             [offset, entries, discontinuity] = await this.parseManifest().catch(() => {});
+            console.log('offset: ' + offset);
             // If there are a lot of underconverted pices (usually because of slow download rate), enable 're' mode that slows down conversion
             if (this.slowConversion == false && entries <= this.settings.ffmpeg.entriesThreshold && discontinuity >= this.settings.ffmpeg.discontinuityThreshold)
                 this.slowConversion = true;
@@ -145,14 +136,14 @@ module.exports = class {
             let options = [
                 '-i', this.path + this.files.movie,
                 '-ss', offset,
-                '-r', 24, // framerate
-                '-g', 48, // group pictures
-                '-keyint_min', 24, // insert a key frame every 24 frames
+                // '-r', 24, // framerate
+                // '-g', 48, // group pictures
+                // '-keyint_min', 24, // insert a key frame every 24 frames
                 '-c:v', 'libx264',
-                // '-preset', 'fast',
                 '-b:v', '1000k',
                 '-c:a', 'aac',
                 '-b:a', '128k',
+                // '-movflags', 'frag_keyframe+empty_moov',
                 '-f', 'hls',
                 '-hls_time', this.settings.ffmpeg.hls_time,
                 '-hls_init_time', this.settings.ffmpeg.hls_time,

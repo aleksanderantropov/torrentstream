@@ -45,6 +45,11 @@ module.exports = class {
             };
             byteStart += file.length;
         });
+
+        this.settings = {
+            maxRetries: 5,
+            retryTimeout: 1000
+        }
     }
 
     async checkFile(filename) {
@@ -143,32 +148,28 @@ module.exports = class {
             }
             // copy file
             else {
-                const result = await fpromise.rename(this.path + filename, this.path + filename + '(temp)')
-                    .catch(() => false);
-                
-                if (result === false) {
-                    reject('CNTRM');
-                    return ;
-                }
+                fs.rename(this.path + filename, this.path + filename + '(temp)', err => {
+                    if (err) return reject('CNTRNM');
 
-                fs.open(this.path + filename, 'w+', (err, fd) => {
-                    if (err) {
-                        reject('CNTOPN');
-                        return ;
-                    }
+                    fs.open(this.path + filename, 'w+', (err, fd) => {
+                        if (err) return reject('CNTPN');
 
-                    const readable = fs.createReadStream( this.path + filename + '(temp)');
-                    const writable = fs.createWriteStream('', {fd: fd, autoClose: false});
-                    readable.pipe(writable);
-                    readable.on('end', async () => {
-                        await fpromise.unlink(this.path + filename + '(temp)')
-                            .catch(err => {
-                                console.log('TorrentClient: Couldn\'t delete file: ',  this.path + filename + '(temp)');
-                                console.log(err);
-                                process.exit(1);
-                            });
-                        file.fd = fd;
-                        resolve();
+                        const readable = fs.createReadStream( this.path + filename + '(temp)');
+                        const writable = fs.createWriteStream('', {fd: fd, autoClose: false});
+
+                        readable.pipe(writable);
+                        readable.on('end', async () => {
+
+                            await fpromise.unlink(this.path + filename + '(temp)')
+                                .catch(err => {
+                                    console.log('TorrentClient: Couldn\'t delete file: ',  this.path + filename + '(temp)');
+                                    console.log(err);
+                                    process.exit(1);
+                                });
+
+                            file.fd = fd;
+                            resolve();
+                        });
                     });
                 });
             }
@@ -206,16 +207,17 @@ module.exports = class {
     }
 
     close() {
-        this.details.forEach(file => {
-            if (file.fd === null) return ;
-            fs.close( file.fd, (err) => {
+        for (const file in this.details) {
+            if (this.details[file].fd === null) return ;
+            console.log('closing ' + file);
+            fs.close( this.details[file].fd, (err) => {
                 if (err) {
                     console.log('Couldn\'t close file: ');
                     process.exit(1);
                 }
-                file.fd = null;
+                this.details[file].fd = null;
             });    
-        })
+        }
     }
 
     complete() {

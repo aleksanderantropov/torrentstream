@@ -123,15 +123,16 @@
         const playButton = new PlayButton();
 
         const socket = io({
-            query: {movie: 'movie', torrentFile: 'torrent-files/unnatural-causes.torrent'}
+            query: {movie: 'movie', torrentFile: 'torrent-files/martian.torrent'}
         });
 
         socket.on('errors', err => {
             errors.innerHTML = "";
-            if (typeof err == 'object') {
+            if (typeof err == 'object')
                 errors.insertAdjacentHTML('beforeEnd', "<p>Internal Server Error</p>");
-            } else
-                err.forEach(error => errors.insertAdjacentHTML('beforeEnd', "<p>" + error + "</p>"));
+            else
+                errors.insertAdjacentHTML('beforeEnd', "<p>" + err + "</p>");
+
             playButton.remove();
         });
 
@@ -153,6 +154,8 @@
             
             playButton.remove();
             placeholder.classList.remove('player_empty');
+
+            socket.off('stream');
         });
 
         placeholder.onclick = event => {

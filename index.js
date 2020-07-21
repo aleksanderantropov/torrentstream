@@ -22,7 +22,7 @@ io.on('connection', async socket => {
 
     socket.on('play', async () => {
         torrents[movie].initialize(torrentFile)
-        .then( () => streams[movie].initialize( torrents[movie] ) )
+        .then( () => streams[movie].initialize( torrents[movie].files.path, torrents[movie].downloads ) )
         .then( () => streams[movie].createPlaylist() )
         .then( () => {
             const subtitlesFile = streams[movie].files.subtitles.length ? streams[movie].files.subtitles[0] : null;
@@ -31,14 +31,13 @@ io.on('connection', async socket => {
         })
         .then( () => streams[movie].convertSubtitles() )
         .then( () => {
-            streams[movie].convertVideo();
-
             torrents[movie].events.on('piece-written', () => streams[movie].downloaded += torrents[movie].parser.BLOCK_SIZE);
             torrents[movie].events.on('files-checked', size => streams[movie].downloaded += size);
-            streams[movie].events.on('manifest-created', () => {
-                console.log('manifest-created');
-                socket.emit('stream', {path: streams[movie].path, playlist: streams[movie].playlist, subtitles: streams[movie].subtitles});
-            });
+            streams[movie].events.on('manifest-created', () =>
+                socket.emit('stream', {path: streams[movie].path, playlist: streams[movie].playlist, subtitles: streams[movie].subtitles})
+            );
+
+            streams[movie].convertVideo();
 
             return torrents[movie].download( streams[movie].files.movie );
         })
@@ -46,6 +45,7 @@ io.on('connection', async socket => {
         .catch(error => {
             if (torrents[movie]) torrents[movie].close();
             if (streams[movie]) streams[movie].close();
+            console.log(error);
             socket.emit('errors', error);
         });
     });
