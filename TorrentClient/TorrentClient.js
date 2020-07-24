@@ -66,6 +66,7 @@ module.exports = class {
                     const failed = this.trackers.trackers.filter( tracker => tracker.failed );
                     if ( failed.length == this.trackers.urls.length ) reject('CNTCNNCT');
                 });
+                
                 // if something needs to be downloaded, create fds for writing
                 this.write('Creating files.');
                 return this.files.createFile(filename)

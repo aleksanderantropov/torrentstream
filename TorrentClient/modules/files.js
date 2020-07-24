@@ -106,7 +106,7 @@ module.exports = class {
                             else resolve();
                         })
                     });
-                }).catch( err => {console.log(err);reject(err);} );
+                }).catch( err => reject(err) );
             }
             this.left = file.length - file.size;
             // copy to blocks
@@ -139,7 +139,6 @@ module.exports = class {
 
             // create file
             if (file.size == 0) {
-                // fs.open(this.path + filename, 'w+', (err, fd) => {
                 fs.open(this.path + filename, 'w+', (err, fd) => {
                     if (err) reject('CNTPN');
                     file.fd = fd;
@@ -154,11 +153,12 @@ module.exports = class {
                     fs.open(this.path + filename, 'w+', (err, fd) => {
                         if (err) return reject('CNTPN');
 
-                        const readable = fs.createReadStream( this.path + filename + '(temp)');
+                        const readable = fs.createReadStream( this.path + filename + '(temp)' );
                         const writable = fs.createWriteStream('', {fd: fd, autoClose: false});
 
                         readable.pipe(writable);
-                        readable.on('end', async () => {
+                        readable.on('error', () => reject('CNTRD'));
+                        readable.on('end', () => {
                             fs.unlink(this.path + filename + '(temp)', err => {
                                 if (err) return reject('CNTDL');
                                 file.fd = fd;
@@ -200,8 +200,8 @@ module.exports = class {
     }
 
     close() {
-        for (const file in this.details) {
-            if (this.details[file].fd === null) return ;
+        for (let file in this.details) {
+            if (this.details[file].fd === null) continue ;
             fs.close( this.details[file].fd, err => {
                 this.details[file].fd = null;
             });    

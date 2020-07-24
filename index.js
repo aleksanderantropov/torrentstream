@@ -78,7 +78,6 @@ io.on('connection', async socket => {
 
     socket.on('disconnect', () => {
         if (io.sockets.adapter.rooms[movie] === undefined) {
-            console.log('closing');
             if (torrents[movie]) torrents[movie].close();
             if (streams[movie]) streams[movie].close();
         }

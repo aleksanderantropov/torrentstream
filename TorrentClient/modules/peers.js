@@ -42,7 +42,8 @@ module.exports = class {
             if ( this.list.filter(peer => !peer.peer.choked).length == 0 ) {
                 console.log('Exceeded connections');
                 return (-1);
-            }
+            } else
+                this.connects = 0;
         } else 
             this.connects++;
 
