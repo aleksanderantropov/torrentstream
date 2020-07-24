@@ -8,6 +8,12 @@ app.use(express.static('video'));
 app.get('/movie', async (req, res) => {
     res.sendFile(__dirname + '/html/index.html');
 });
+app.get('/movie2', async (req, res) => {
+    res.sendFile(__dirname + '/html/index2.html');
+});
+app.get('/movie3', async (req, res) => {
+    res.sendFile(__dirname + '/html/index3.html');
+});
 
 let torrents = [];
 let streams = [];
@@ -41,11 +47,14 @@ io.on('connection', async socket => {
 
             return torrents[movie].download( streams[movie].files.movie );
         })
-        .then( () => streams[movie].slowConversion = false)
+        .then( () => {
+            streams[movie].slowConversion = false;
+            streams[movie].restart = false;
+        })
         .catch(error => {
             if (torrents[movie]) torrents[movie].close();
             if (streams[movie]) streams[movie].close();
-            console.log(error);
+            console.log('error: ' + error);
             socket.emit('errors', error);
         });
     });

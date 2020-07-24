@@ -25,6 +25,7 @@ module.exports = class {
                 subtitles: /.srt|.webvtt|.ass/
             },
             ffmpeg: {
+                downloadThreshold: 3000000,
                 hls_time: 4,
                 entriesThreshold: 10,
                 discontinuityThreshold: 3,
@@ -64,7 +65,6 @@ module.exports = class {
             
             fs.readFile(this.path + this.settings.manifest, (err, data) => {
                 this.converted = !err && data.toString().match(/#EXT-X-ENDLIST/) !== null;
-                console.log('converted: ' + this.converted);
                 resolve();
             });
         });
@@ -122,7 +122,7 @@ module.exports = class {
 
     async convertVideo() {
         if (this.converted) this.events.emit('manifest-created');
-        else if (this.status == 'idle' && this.downloaded > 1000000) {
+        else if (this.status == 'idle' && this.downloaded > this.settings.ffmpeg.downloadThreshold) {
             console.log('Stream: Converting video');
             this.status = 'converting';
 
@@ -158,7 +158,7 @@ module.exports = class {
             this.process.stderr.on('data', () => this.checkManifest());
 
             this.process.stderr.setEncoding('utf8'); // debug
-            this.process.stderr.on('data', data => console.log(data) ); // debug
+            // this.process.stderr.on('data', data => console.log(data) ); // debug
 
             this.process.on('close', (code, signal) => {
                 console.log('Stream: End converting video');
@@ -191,8 +191,6 @@ module.exports = class {
 
                 const data = fs.readFileSync(this.path + this.settings.manifest).toString();
                 const discontinuityMatch = [ ...data.matchAll( this.settings.ffmpeg.patterns.discontinuity ) ];
-                console.log(data.matchAll( this.settings.ffmpeg.patterns.discontinuity ));
-
                 const durationMatch = [ ...data.matchAll( this.settings.ffmpeg.patterns.duration ) ];
 
                 let duration = 0;

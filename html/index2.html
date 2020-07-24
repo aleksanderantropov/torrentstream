@@ -130,7 +130,7 @@
                 this.playButton.classList.add('player__button_play');
 
                 this.socket = io({
-                    query: { movie: window.location.pathname, torrentFile: 'torrent-files/old-guard.torrent' }
+                    query: { movie: window.location.pathname, torrentFile: 'torrent-files/forrest-gump.torrent' }
                 });
                 this.socket.on('errors', err => player.showErrors(err));
                 this.socket.on('stream', stream => {

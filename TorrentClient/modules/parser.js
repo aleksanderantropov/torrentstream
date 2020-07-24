@@ -1,7 +1,7 @@
 const bencode = require('bencode');
-const fpromise = require('fs/promises');
 const Buffer = require('buffer').Buffer;
 const crypto = require('crypto');
+const fs = require('fs');
 
 module.exports = class {
     constructor() {
@@ -19,31 +19,38 @@ module.exports = class {
         };
     }
 
-    async read(torrentFile) {
-        const torrentData = await fpromise.readFile(torrentFile)
-            .catch(() => {
-                console.log('Couldn\'t open file: ', torrentFile);
-                process.exit(1);
-            });
+    read(torrentFile) {
+        return new Promise( async (resolve, reject) => {
+            fs.readFile(torrentFile, (err, torrentData) => {
+                if (err) return reject('CNTRD');
 
-        // torrent object
-        this.torrent = bencode.decode( torrentData );
-        // size as number
-        const files = this.torrent.info.files;
-        this.details.sizeNumber = files ?
-            files.map( file => file.length ).reduce( (size, file) => size + file ) 
-            : this.torrent.info.length;
-        // size as buffer
-        this.details.sizeBuffer = Buffer.alloc(8).writeBigInt64BE( BigInt(this.details.sizeNumber) );
-        // details
-        this.details.pieceSize = this.torrent.info['piece length'];
-        this.details.lastPieceSize = this.details.sizeNumber % this.details.pieceSize;
-        this.details.lastPieceIndex = Math.floor(this.details.sizeNumber / this.details.pieceSize);
-        this.details.nBlocks = Math.ceil( this.details.pieceSize / this.BLOCK_SIZE );
-        this.details.nBlocksLast = Math.ceil( this.details.lastPieceSize / this.BLOCK_SIZE );
-        // hash info
-        const info = bencode.encode(this.torrent.info);
-        this.details.hashedInfo = crypto.createHash('sha1').update(info).digest();
+                // torrent object
+                try {
+                    this.torrent = bencode.decode( torrentData );
+                } catch (e) {
+                    return reject('CNTPRS');
+                }
+                // size as number
+                const files = this.torrent.info.files;
+                this.details.sizeNumber = files ?
+                    files.map( file => file.length ).reduce( (size, file) => size + file ) 
+                    : this.torrent.info.length;
+
+                // size as buffer
+                this.details.sizeBuffer = Buffer.alloc(8).writeBigInt64BE( BigInt(this.details.sizeNumber) );
+                // details
+                this.details.pieceSize = this.torrent.info['piece length'];
+                this.details.lastPieceSize = this.details.sizeNumber % this.details.pieceSize;
+                this.details.lastPieceIndex = Math.floor(this.details.sizeNumber / this.details.pieceSize);
+                this.details.nBlocks = Math.ceil( this.details.pieceSize / this.BLOCK_SIZE );
+                this.details.nBlocksLast = Math.ceil( this.details.lastPieceSize / this.BLOCK_SIZE );
+                // hash info
+                const info = bencode.encode(this.torrent.info);
+                this.details.hashedInfo = crypto.createHash('sha1').update(info).digest();
+
+                resolve();
+            });
+        });
     }
 
     getPieceSize(pieceIndex) {

@@ -37,6 +37,7 @@ module.exports = class {
             }
         });
 
+        // if after some time all peers are choked, exit
         if (this.connects >= this.settings.maxEmptyConnects) {
             if ( this.list.filter(peer => !peer.peer.choked).length == 0 ) {
                 console.log('Exceeded connections');

@@ -1,6 +1,5 @@
 const url = require('url');
 const dgram = require('dgram');
-const http = require('http');
 const bencode = require('bencode');
 const events = require('events');
 const socks5 = require('socks5-http-client');
@@ -18,8 +17,7 @@ module.exports = class {
         if ( torrent['announce-list'] )
             torrent['announce-list'].forEach( path => {
                 const parsed = url.parse( path.toString() );
-                if ( !parsed.href.includes('local') )
-                    this.urls.push( parsed );
+                if ( !parsed.href.includes('local') ) this.urls.push( parsed );
             });
 
         this.trackers = [];  
@@ -27,7 +25,7 @@ module.exports = class {
 
     // connect to trackers
     connect() {
-        this.urls.forEach( url => this.trackers.push( new Tracker(url, this.requests, this.peers, this.events, this.retries, this.files) ) );
+        this.urls.forEach( url => this.trackers.push( new Tracker(url, this.requests, this.peers, this.events, this.files) ) );
     }
     close() {
         this.trackers.forEach( tracker => {
@@ -39,12 +37,11 @@ module.exports = class {
 }
 
 class Tracker {
-    constructor(url, requests, peers, events, retries, files) {
+    constructor(url, requests, peers, events, files) {
         this.url = url;
         this.requests = requests;
         this.peers = peers;
-        // connection retries
-        this.retries = retries;
+        this.failed = false;
         // rerequest interval
         this.interval = 10000;
         this.events = events;
@@ -52,8 +49,14 @@ class Tracker {
 
         if (url.protocol == 'udp:') {
             this.socket = dgram.createSocket('udp4')
-                .on( 'error', () => {} )
-                .on( 'message', response => this.manageUdp(response) );
+                .on( 'error', () => {
+                    this.failed = true;
+                    this.events.emit('connect-fail');
+                })
+                .on( 'message', response => {
+                    this.failed = false;
+                    this.manageUdp(response);
+                });
             this.sendUdp( this.requests.connectUdp() );
         }
         if (url.protocol == 'http:') {
@@ -78,7 +81,14 @@ class Tracker {
 
     // send a udp request
     sendUdp(request) {
-        this.socket.send(request, 0, request.length, this.url.port ? this.url.port : 80, this.url.hostname, () => {});
+        this.socket.send(request, 0, request.length, this.url.port ? this.url.port : 80, this.url.hostname, err => {
+            if (err) {
+                this.failed = true;
+                this.events.emit('connect-fail'); 
+            } else {
+                this.failed = false;
+            }
+        });
     }
     // manage response from a udp tracker server
     manageUdp(response) {
@@ -109,9 +119,13 @@ class Tracker {
                 // read stream
                 response.on( 'data', chunk => data = Buffer.concat([data, chunk]) );
                 response.on( 'end', () => this.manageHttp( bencode.decode(data) ) );
-            } else
+                this.failed = false;
+            } else {
+                this.failed = true;
                 this.events.emit('connect-fail');
+            }
         }).on('error', () => {
+            this.failed = true;
             this.events.emit('connect-fail');
         });
     }
