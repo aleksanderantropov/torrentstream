@@ -136,14 +136,14 @@ module.exports = class {
             let options = [
                 '-i', this.path + this.files.movie,
                 '-ss', offset,
-                // '-r', 24, // framerate
-                // '-g', 48, // group pictures
-                // '-keyint_min', 24, // insert a key frame every 24 frames
+                '-r', 24, // framerate
+                '-g', 48, // group pictures
+                '-keyint_min', 24, // insert a key frame every 24 frames
                 '-c:v', 'libx264',
                 '-b:v', '1000k',
                 '-c:a', 'aac',
                 '-b:a', '128k',
-                // '-movflags', 'frag_keyframe+empty_moov',
+                '-movflags', 'frag_keyframe+empty_moov',
                 '-f', 'hls',
                 '-hls_time', this.settings.ffmpeg.hls_time,
                 '-hls_init_time', this.settings.ffmpeg.hls_time,
@@ -155,7 +155,7 @@ module.exports = class {
             if (this.slowConversion) options.unshift('-re');
             
             this.process = spawn('ffmpeg', options);
-            this.process.stderr.on('data', () => this.checkManifest());
+            this.process.stderr.on('data', () => this.checkManifest() );
 
             this.process.stderr.setEncoding('utf8'); // debug
             // this.process.stderr.on('data', data => console.log(data) ); // debug

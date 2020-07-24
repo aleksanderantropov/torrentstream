@@ -177,6 +177,7 @@
                 err = typeof err == 'object' ? "Internal Server Error</p>" : err;
                 this.errors.innerHTML = "<p>" + err + "</p>";
 
+                this.container.onclick = null;
                 this.container.classList.add('player_empty');
                 this.playButton.remove();
                 const video = document.getElementById('video');

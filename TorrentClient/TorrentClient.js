@@ -13,11 +13,13 @@ module.exports = class {
         // can be deleted in production
         this.buffer = Buffer.alloc(100);
         this.events = new events();
+        this.status = 'idle';
     }
 
     initialize(torrentFile) {
         return new Promise(async (resolve, reject) => {
             // parse torrent file into object
+            this.status = 'initialized';
             this.parser = new Parser();
             this.parser.read(torrentFile)
             .then(() => {
@@ -92,6 +94,7 @@ module.exports = class {
     }
 
     close() {
+        this.status = 'idle';
         if (this.peers) {
             this.peers.close();
             this.peers.events.removeAllListeners('peers-added');
