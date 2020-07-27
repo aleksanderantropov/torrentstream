@@ -27,10 +27,10 @@ module.exports = class {
     }
 
     connect() {
-        let connections = 0; //debug
+        // let connections = 0; //debug
         this.list.forEach( p => {
             if ( !p.peer || !p.peer.connected ) {
-                connections++; //debug
+                // connections++; //debug
                 p.peer = new Peer(this.requests, this.blocks, this.parser);
                 p.peer.connect(p.ip, p.port);
                 p.peer.events.on('piece-received', piece => this.events.emit('piece-received', piece));
@@ -47,7 +47,7 @@ module.exports = class {
         } else 
             this.connects++;
 
-        console.log('Connected to new peers: ' + connections); // debug
+        // console.log('Connected to new peers: ' + connections); // debug
     }
     
     // close peer connections

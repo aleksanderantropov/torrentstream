@@ -59,7 +59,7 @@ module.exports = class {
                 }
 
                 // request new peers
-                this.write('Connecting to trackers.');
+                // this.write('Connecting to trackers.');
                 this.trackers.connect();
 
                 this.trackers.events.on( 'connect-fail', () => {
@@ -68,14 +68,14 @@ module.exports = class {
                 });
                 
                 // if something needs to be downloaded, create fds for writing
-                this.write('Creating files.');
                 return this.files.createFile(filename)
             })
             .then( () => {
+                this.events.emit('files-created');
+
                 if (this.peers.list.length) this.peers.connect();
                 // events
                 this.peers.events.on( 'peers-added', () => {
-                    this.write('Connecting to peers.');
                     if ( this.peers.connect() == -1) reject('CNTCNNCT');
                 });
                 this.peers.events.on( 'piece-received', piece => this.files.writeFile(filename, piece).catch( err => reject(err) ) );

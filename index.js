@@ -23,7 +23,7 @@ io.on('connection', async socket => {
     const movie = socket.handshake.query.movie;
     const torrentFile = socket.handshake.query.torrentFile;
 
-    console.log(movie);
+    console.log('Connected to: ' + movie);
 
     if (!torrents[movie]) torrents[movie] = new TorrentClient('video');
     if (!streams[movie]) streams[movie] = new Stream();
@@ -38,23 +38,22 @@ io.on('connection', async socket => {
             .then( () => {
                 const subtitlesFile = streams[movie].files.subtitles.length ? streams[movie].files.subtitles[0] : null;
                 if (subtitlesFile) return torrents[movie].download( subtitlesFile );
-                return Promise.resolve();
+                else return Promise.resolve();
             })
             .then( () => streams[movie].convertSubtitles() )
             .then( () => {
                 torrents[movie].events.on('piece-written', () => streams[movie].downloaded += torrents[movie].parser.BLOCK_SIZE);
                 torrents[movie].events.on('files-checked', size => streams[movie].downloaded += size);
+                torrents[movie].events.on('files-created', () => streams[movie].convertVideo());
+
                 streams[movie].events.on('manifest-created', () =>{
                     socket.emit('stream', {path: streams[movie].path, playlist: streams[movie].playlist, subtitles: streams[movie].subtitles});
-                    torrents[movie].events.removeAllListeners('piece-written');
-                    torrents[movie].events.removeAllListeners('files-checked');
                 });
-
-                streams[movie].convertVideo();
-
+                
                 return torrents[movie].download( streams[movie].files.movie );
             })
             .then( () => {
+                torrents[movie].events.removeAllListeners('piece-written');
                 streams[movie].slowConversion = false;
                 streams[movie].restart = false;
             })
@@ -77,12 +76,26 @@ io.on('connection', async socket => {
     });
 
     socket.on('disconnect', () => {
-        if (io.sockets.adapter.rooms[movie] === undefined) {
-            if (torrents[movie]) torrents[movie].close();
-            if (streams[movie]) streams[movie].close();
+        let roomie;
+        const room = io.sockets.adapter.rooms[movie];
+
+        if (room && room.length == 1) {
+            roomie = Object.keys(room.sockets)[0];
+        }
+
+        if (room === undefined || roomie == socket.id) {
+            if (torrents[movie]) {
+                torrents[movie].close();
+                torrents[movie].events.removeAllListeners('piece-written');
+                torrents[movie].events.removeAllListeners('files-checked');
+                torrents[movie].events.removeAllListeners('files-created');
+            }
+            if (streams[movie]) {
+                streams[movie].close();
+                streams[movie].events.removeAllListeners('manifest-created');
+            }
         }
     });
-
 });
 
 http.listen(80);

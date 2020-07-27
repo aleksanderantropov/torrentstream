@@ -156,6 +156,8 @@ module.exports = class {
                         const readable = fs.createReadStream( this.path + filename + '(temp)' );
                         const writable = fs.createWriteStream('', {fd: fd, autoClose: false});
 
+                        writable.on('error', () => reject('CNTWRT'));
+
                         readable.pipe(writable);
                         readable.on('error', () => reject('CNTRD'));
                         readable.on('end', () => {

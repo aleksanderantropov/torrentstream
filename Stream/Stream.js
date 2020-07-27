@@ -51,6 +51,7 @@ module.exports = class {
             this.restart = true;
             this.downloaded = 0;
             this.slowConversion = false;
+            this.process = null;
 
             const movies = this.downloads.filter(file => file.match(this.settings.patterns.movies))
             if (!movies.length) return reject('NKNWNFRMT');
@@ -118,15 +119,14 @@ module.exports = class {
     }
 
     async convertVideo() {
+        console.log('Stream: Converting video ' + this.files.movie);
         if (this.converted) this.events.emit('manifest-created');
         else if (this.status == 'idle' && this.downloaded > this.settings.ffmpeg.downloadThreshold) {
-            console.log('Stream: Converting video');
             this.status = 'converting';
 
             let offset, entries, discontinuity;
             [offset, entries, discontinuity] = await this.parseManifest().catch(() => {});
-            console.log('offset: ' + offset);
-            // If there are a lot of underconverted pices (usually because of slow download rate), enable 're' mode that slows down conversion
+            // If there are a lot of underconverted pieces (usually because of slow download rate), enable 're' mode that slows down conversion
             if (this.slowConversion == false && entries <= this.settings.ffmpeg.entriesThreshold && discontinuity >= this.settings.ffmpeg.discontinuityThreshold)
                 this.slowConversion = true;
 
@@ -152,16 +152,19 @@ module.exports = class {
             if (this.slowConversion) options.unshift('-re');
             
             this.process = spawn('ffmpeg', options);
-            this.process.stderr.on('data', () => this.checkManifest() );
+            this.process.stderr.on('data', () => {
+                if (this.ready) this.process.stderr.removeAllListeners('data');
+                this.checkManifest();
+            });
 
-            this.process.stderr.setEncoding('utf8'); // debug
-            this.process.stderr.on('data', data => console.log(data) ); // debug
+            // this.process.stderr.setEncoding('utf8'); // debug
+            // this.process.stderr.on('data', data => console.log(data) ); // debug
 
             this.process.on('close', (code, signal) => {
                 console.log('Stream: End converting video');
-                if (signal == 'SIGTERM') {
-                    clearTimeout(this.videoTimer);
-                } else if (this.restart) {
+                if (signal == 'SIGTERM'|| code == 255) return;
+                
+                if (this.restart) {
                     this.status = 'idle';
                     this.videoTimer = setTimeout(() => this.convertVideo(), 5000);
                 } else {
@@ -172,10 +175,12 @@ module.exports = class {
 
         } else if (this.restart)
             this.videoTimer = setTimeout(() => this.convertVideo(), 5000);
+
     }
 
     close() {
         if (this.process)  {
+            clearTimeout(this.videoTimer);
             this.status = 'cancelled';
             this.process.kill();
         }
