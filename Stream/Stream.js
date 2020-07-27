@@ -126,7 +126,8 @@ module.exports = class {
 
             let offset, entries, discontinuity;
             [offset, entries, discontinuity] = await this.parseManifest().catch(() => {});
-            // If there are a lot of underconverted pieces (usually because of slow download rate), enable 're' mode that slows down conversion
+            // If there are a lot of underconverted pieces (usually because of slow download rate)
+            // Then enable 're' mode that slows down conversion
             if (this.slowConversion == false && entries <= this.settings.ffmpeg.entriesThreshold && discontinuity >= this.settings.ffmpeg.discontinuityThreshold)
                 this.slowConversion = true;
 
