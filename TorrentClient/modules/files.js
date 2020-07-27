@@ -180,7 +180,7 @@ module.exports = class {
             const offset = byteStart < file.byteStart ? file.byteStart - byteStart : 0;
             const position = byteStart - file.byteStart + offset;
             const length = piece.block.length + byteStart > file.byteEnd ? file.byteEnd - byteStart + 1 : piece.block.length;
-            console.log('Writing to file: ', filename, piece.index, piece.begin / this.parser.BLOCK_SIZE);
+            // console.log('Writing to file: ', filename, piece.index, piece.begin / this.parser.BLOCK_SIZE);
             fs.write(file.fd, piece.block, offset, length - offset, position, err => {
                 if (err) return reject('CNTWRT');
 

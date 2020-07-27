@@ -1,9 +1,6 @@
 const fs = require('fs');
 const spawn = require('child_process').spawn;
 const Events = require('events');
-const { Stream } = require('stream');
-const { Console } = require('console');
-const { disconnect } = require('process');
 
 module.exports = class {
     constructor(path, downloads) {
@@ -158,7 +155,7 @@ module.exports = class {
             this.process.stderr.on('data', () => this.checkManifest() );
 
             this.process.stderr.setEncoding('utf8'); // debug
-            // this.process.stderr.on('data', data => console.log(data) ); // debug
+            this.process.stderr.on('data', data => console.log(data) ); // debug
 
             this.process.on('close', (code, signal) => {
                 console.log('Stream: End converting video');
