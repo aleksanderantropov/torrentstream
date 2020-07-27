@@ -120,6 +120,7 @@ module.exports = class {
 
     async convertVideo() {
         console.log('Stream: Converting video ' + this.files.movie);
+        
         if (this.converted) this.events.emit('manifest-created');
         else if (this.status == 'idle' && this.downloaded > this.settings.ffmpeg.downloadThreshold) {
             this.status = 'converting';
